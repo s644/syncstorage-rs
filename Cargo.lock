@@ -3116,7 +3116,7 @@ dependencies = [
 
 [[package]]
 name = "syncstorage-settings"
-version = "0.1.0"
+version = "0.10.2"
 dependencies = [
  "num_cpus",
  "serde 1.0.135",
@@ -3307,7 +3307,7 @@ dependencies = [
 
 [[package]]
 name = "tokenserver-settings"
-version = "0.1.0"
+version = "0.10.2"
 dependencies = [
  "serde 1.0.135",
  "tokenserver-common",
