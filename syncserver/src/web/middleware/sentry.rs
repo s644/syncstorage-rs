@@ -10,12 +10,12 @@ use actix_web::{
 use futures::future::{self, LocalBoxFuture};
 use sentry::protocol::Event;
 use sentry_backtrace::parse_stacktrace;
-use syncserver_common::ReportableError;
+use syncserver_common::{Metrics, ReportableError, Tags};
 use tokenserver_common::error::TokenserverError;
 
 use crate::error::ApiError;
-use crate::server::{metrics::Metrics, ServerState};
-use crate::web::tags::Tags;
+use crate::server::ServerState;
+use crate::web::tags::TagsWrapper;
 
 pub struct SentryWrapper;
 
@@ -80,7 +80,7 @@ where
     }
 
     fn call(&mut self, sreq: ServiceRequest) -> Self::Future {
-        let mut tags = Tags::from(sreq.head());
+        let TagsWrapper(mut tags) = TagsWrapper::from(sreq.head());
         sreq.extensions_mut().insert(tags.clone());
         let metrics = sreq
             .app_data::<Data<ServerState>>()
