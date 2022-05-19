@@ -7,6 +7,7 @@ use std::{
 use actix_web::{http::StatusCode, Error, HttpResponse};
 use serde::Serialize;
 use serde_json::Value;
+use tokenserver_auth::{MakeTokenPlaintext, Tokenlib, TokenserverOrigin};
 use tokenserver_common::{error::TokenserverError, NodeType};
 use tokenserver_mysql::{
     models::Db,
@@ -14,7 +15,6 @@ use tokenserver_mysql::{
 };
 
 use super::{
-    auth::{MakeTokenPlaintext, Tokenlib, TokenserverOrigin},
     extractors::{DbWrapper, TokenserverRequest},
     TokenserverMetrics,
 };

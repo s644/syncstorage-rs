@@ -10,17 +10,17 @@ use std::{future::Future, sync::Arc};
 
 use actix_web::{
     dev::{Service, ServiceRequest, ServiceResponse},
+    web::Data,
     Error, HttpRequest,
 };
 use syncserver_settings::Secrets;
 use syncstorage_common::{Metrics, Tags};
 use syncstorage_db_common::util::SyncTimestamp;
+use tokenserver_auth::TokenserverOrigin;
 
 use crate::error::{ApiError, ApiErrorKind};
 use crate::server::ServerState;
-use crate::tokenserver::auth::TokenserverOrigin;
 use crate::web::{extractors::HawkIdentifier, DOCKER_FLOW_ENDPOINTS};
-use actix_web::web::Data;
 
 /// The resource in question's Timestamp
 pub struct ResourceTimestamp(SyncTimestamp);

@@ -7,6 +7,7 @@ members = [
     "syncstorage-mysql",
     "syncstorage-settings",
     "syncstorage-spanner",
+    "tokenserver-auth",
     "tokenserver-common",
     "tokenserver-mysql",
     "tokenserver-settings",

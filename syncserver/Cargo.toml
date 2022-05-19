@@ -53,7 +53,6 @@ mime = "0.3"
 num_cpus = "1"
 # must match what's used by googleapis-raw
 protobuf = "2.20.0"
-pyo3 = { version = "0.14", features = ["auto-initialize"] }
 rand = "0.8"
 regex = "1.4"
 reqwest = { version = "0.10.10", features = ["json", "rustls-tls"] }
@@ -86,6 +85,7 @@ syncstorage-settings = { path = "../syncstorage-settings" }
 syncstorage-spanner = { path = "../syncstorage-spanner" }
 time = "^0.3"
 thiserror = "1.0.26"
+tokenserver-auth = { path = "../tokenserver-auth" }
 tokenserver-common = { path = "../tokenserver-common" }
 tokenserver-mysql = { path = "../tokenserver-mysql" }
 tokenserver-settings = { path = "../tokenserver-settings" }
@@ -97,9 +97,6 @@ uuid = { version = "0.8.2", features = ["serde", "v4"] }
 validator = "0.14"
 validator_derive = "0.14"
 woothee = "0.11"
-
-[dev-dependencies]
-mockito = "0.30.0"
 
 [features]
 no_auth = []

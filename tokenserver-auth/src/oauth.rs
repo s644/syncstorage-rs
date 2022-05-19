@@ -1,4 +1,3 @@
-use actix_web::Error;
 use async_trait::async_trait;
 use futures::TryFutureExt;
 use pyo3::{
@@ -38,9 +37,9 @@ impl RemoteVerifier {
 }
 
 impl TryFrom<&Settings> for RemoteVerifier {
-    type Error = Error;
+    type Error = TokenserverError;
 
-    fn try_from(settings: &Settings) -> Result<Self, Error> {
+    fn try_from(settings: &Settings) -> Result<Self, Self::Error> {
         let inner: Py<PyAny> = Python::with_gil::<_, Result<Py<PyAny>, PyErr>>(|py| {
             let code = include_str!("verify.py");
             let module = PyModule::from_code(py, code, Self::FILENAME, Self::FILENAME)?;
@@ -56,7 +55,7 @@ impl TryFrom<&Settings> for RemoteVerifier {
 
             Ok(object)
         })
-        .map_err(super::pyerr_to_actix_error)?;
+        .map_err(super::pyerr_to_tokenserver_error)?;
 
         Ok(Self {
             inner,
