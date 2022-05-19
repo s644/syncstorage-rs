@@ -12,13 +12,13 @@ use actix_web::{
 };
 use cadence::StatsdClient;
 use syncserver_settings::Settings;
+use syncstorage_common::Metrics;
 use syncstorage_db_common::DbPool;
 use syncstorage_settings::{Deadman, ServerLimits};
 use tokio::sync::RwLock;
 
 use crate::db::{pool_from_settings, spawn_pool_periodic_reporter};
-use crate::error::ApiError;
-use crate::server::metrics::Metrics;
+use crate::error::{ApiError, ApiErrorKind};
 use crate::tokenserver;
 use crate::web::{handlers, middleware};
 
@@ -231,11 +231,12 @@ macro_rules! build_app_without_syncstorage {
 impl Server {
     pub async fn with_settings(settings: Settings) -> Result<dev::Server, ApiError> {
         let settings_copy = settings.clone();
-        let metrics = metrics::metrics_from_opts(
+        let metrics = syncstorage_common::metrics_from_opts(
             &settings.syncstorage.statsd_label,
             settings.statsd_host.as_deref(),
             settings.statsd_port,
-        )?;
+        )
+        .map_err(ApiErrorKind::Internal)?;
         let host = settings.host.clone();
         let port = settings.port;
         let db_pool = pool_from_settings(&settings.syncstorage, &Metrics::from(&metrics)).await?;
@@ -252,11 +253,12 @@ impl Server {
         let tokenserver_state = if settings.tokenserver.enabled {
             let state = tokenserver::ServerState::from_settings(
                 &settings.tokenserver,
-                metrics::metrics_from_opts(
+                syncstorage_common::metrics_from_opts(
                     &settings.tokenserver.statsd_label,
                     settings.statsd_host.as_deref(),
                     settings.statsd_port,
-                )?,
+                )
+                .map_err(ApiErrorKind::Internal)?,
             )?;
 
             spawn_pool_periodic_reporter(
@@ -312,11 +314,12 @@ impl Server {
         let secrets = Arc::new(settings.master_secret.clone());
         let tokenserver_state = tokenserver::ServerState::from_settings(
             &settings.tokenserver,
-            metrics::metrics_from_opts(
+            syncstorage_common::metrics_from_opts(
                 &settings.tokenserver.statsd_label,
                 settings.statsd_host.as_deref(),
                 settings.statsd_port,
-            )?,
+            )
+            .map_err(ApiErrorKind::Internal)?,
         )?;
 
         spawn_pool_periodic_reporter(

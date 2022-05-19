@@ -13,12 +13,13 @@ use actix_web::{
     Error, HttpRequest,
 };
 use syncserver_settings::Secrets;
+use syncstorage_common::{Metrics, Tags};
 use syncstorage_db_common::util::SyncTimestamp;
 
 use crate::error::{ApiError, ApiErrorKind};
-use crate::server::{metrics::Metrics, ServerState};
+use crate::server::ServerState;
 use crate::tokenserver::auth::TokenserverOrigin;
-use crate::web::{extractors::HawkIdentifier, tags::Tags, DOCKER_FLOW_ENDPOINTS};
+use crate::web::{extractors::HawkIdentifier, DOCKER_FLOW_ENDPOINTS};
 use actix_web::web::Data;
 
 /// The resource in question's Timestamp

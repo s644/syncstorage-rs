@@ -10,8 +10,9 @@ use actix_web::{
 use futures::future::{self, Either, Ready};
 use lazy_static::lazy_static;
 use regex::Regex;
+use syncstorage_common::Metrics;
 
-use crate::server::{metrics::Metrics, ServerState};
+use crate::server::ServerState;
 
 lazy_static! {
     // e.g. "Firefox-iOS-Sync/18.0b1 (iPhone; iPhone OS 13.2.2) (Fennec (synctesting))"

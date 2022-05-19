@@ -1,5 +1,5 @@
 use std::error::Error as StdError;
-use std::task::Context;
+use std::task::{Context, Poll};
 use std::{cell::RefCell, rc::Rc};
 
 use actix_web::{
@@ -9,11 +9,11 @@ use actix_web::{
 };
 use futures::future::{self, LocalBoxFuture, TryFutureExt};
 use sentry::protocol::Event;
-use std::task::Poll;
+use syncstorage_common::{Metrics, Tags};
 
 use crate::error::ApiError;
-use crate::server::{metrics::Metrics, ServerState};
-use crate::web::tags::Tags;
+use crate::server::ServerState;
+use crate::web::tags::TagsWrapper;
 use sentry_backtrace::parse_stacktrace;
 
 pub struct SentryWrapper;
@@ -79,7 +79,7 @@ where
     }
 
     fn call(&mut self, sreq: ServiceRequest) -> Self::Future {
-        let mut tags = Tags::from(sreq.head());
+        let TagsWrapper(mut tags) = TagsWrapper::from(sreq.head());
         sreq.extensions_mut().insert(tags.clone());
         let metrics = sreq
             .app_data::<Data<ServerState>>()

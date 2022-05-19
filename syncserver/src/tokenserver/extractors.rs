@@ -24,12 +24,11 @@ use tokenserver_common::{
     error::{ErrorLocation, TokenserverError},
     NodeType,
 };
+use tokenserver_mysql::{models::Db, params, pool::DbPool, results};
 
-use super::{
-    db::{models::Db, params, pool::DbPool, results},
-    LogItemsMutator, ServerState, TokenserverMetrics,
-};
-use crate::{error::ApiError, server::metrics};
+use super::{LogItemsMutator, ServerState, TokenserverMetrics};
+use crate::error::ApiError;
+use crate::server::metrics;
 
 lazy_static! {
     static ref CLIENT_STATE_REGEX: Regex = Regex::new("^[a-zA-Z0-9._-]{1,32}$").unwrap();
@@ -190,7 +189,7 @@ impl FromRequest for TokenserverRequest {
                 hash_device_id(&hashed_fxa_uid, device_id, fxa_metrics_hash_secret)
             };
 
-            let db = <Box<dyn Db>>::extract(&req).await?;
+            let DbWrapper(db) = DbWrapper::extract(&req).await?;
             let service_id = {
                 let path = req.match_info();
 
@@ -281,7 +280,9 @@ struct QueryParams {
     pub duration: Option<String>,
 }
 
-impl FromRequest for Box<dyn Db> {
+pub struct DbWrapper(pub Box<dyn Db>);
+
+impl FromRequest for DbWrapper {
     type Config = ();
     type Error = Error;
     type Future = LocalBoxFuture<'static, Result<Self, Self::Error>>;
@@ -290,10 +291,12 @@ impl FromRequest for Box<dyn Db> {
         let req = req.clone();
 
         Box::pin(async move {
-            <Box<dyn DbPool>>::extract(&req)
+            DbPoolWrapper::extract(&req)
                 .await?
+                .0
                 .get()
                 .await
+                .map(Self)
                 .map_err(|e| {
                     TokenserverError {
                         context: format!("Couldn't acquire a database connection: {}", e),
@@ -305,7 +308,9 @@ impl FromRequest for Box<dyn Db> {
     }
 }
 
-impl FromRequest for Box<dyn DbPool> {
+struct DbPoolWrapper(Box<dyn DbPool>);
+
+impl FromRequest for DbPoolWrapper {
     type Config = ();
     type Error = Error;
     type Future = LocalBoxFuture<'static, Result<Self, Self::Error>>;
@@ -318,7 +323,7 @@ impl FromRequest for Box<dyn DbPool> {
             // code is rolled out, so we will eventually be able to remove this unwrap().
             let state = get_server_state(&req)?.as_ref().as_ref().unwrap();
 
-            Ok(state.db_pool.clone())
+            Ok(Self(state.db_pool.clone()))
         })
     }
 }
@@ -666,12 +671,11 @@ mod tests {
     use serde_json;
     use syncserver_settings::Settings as GlobalSettings;
     use syncstorage_settings::ServerLimits;
+    use tokenserver_mysql::mock::MockDbPool as MockTokenserverPool;
     use tokenserver_settings::Settings as TokenserverSettings;
 
-    use crate::server::metrics;
     use crate::tokenserver::{
         auth::{browserid, oauth, MockVerifier},
-        db::mock::MockDbPool as MockTokenserverPool,
         ServerState,
     };
 
@@ -1288,7 +1292,7 @@ mod tests {
             node_type: NodeType::default(),
             service_id: None,
             metrics: Box::new(
-                metrics::metrics_from_opts(
+                syncstorage_common::metrics_from_opts(
                     &tokenserver_settings.statsd_label,
                     syncserver_settings.statsd_host.as_deref(),
                     syncserver_settings.statsd_port,

@@ -8,14 +8,14 @@ use actix_web::{http::StatusCode, Error, HttpResponse};
 use serde::Serialize;
 use serde_json::Value;
 use tokenserver_common::{error::TokenserverError, NodeType};
+use tokenserver_mysql::{
+    models::Db,
+    params::{GetNodeId, PostUser, PutUser, ReplaceUsers},
+};
 
 use super::{
     auth::{MakeTokenPlaintext, Tokenlib, TokenserverOrigin},
-    db::{
-        models::Db,
-        params::{GetNodeId, PostUser, PutUser, ReplaceUsers},
-    },
-    extractors::TokenserverRequest,
+    extractors::{DbWrapper, TokenserverRequest},
     TokenserverMetrics,
 };
 use crate::error::ApiError;
@@ -34,7 +34,7 @@ pub struct TokenserverResult {
 
 pub async fn get_tokenserver_result(
     req: TokenserverRequest,
-    db: Box<dyn Db>,
+    DbWrapper(db): DbWrapper,
     TokenserverMetrics(mut metrics): TokenserverMetrics,
 ) -> Result<HttpResponse, Error> {
     let updates = update_user(&req, db).await?;
@@ -186,7 +186,7 @@ async fn update_user(req: &TokenserverRequest, db: Box<dyn Db>) -> Result<UserUp
     }
 }
 
-pub async fn heartbeat(db: Box<dyn Db>) -> Result<HttpResponse, Error> {
+pub async fn heartbeat(DbWrapper(db): DbWrapper) -> Result<HttpResponse, Error> {
     let mut checklist = HashMap::new();
     checklist.insert(
         "version".to_owned(),
