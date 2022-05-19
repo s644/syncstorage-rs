@@ -11,8 +11,8 @@ use futures::future::{self, LocalBoxFuture, TryFutureExt};
 use syncstorage_common::{X_LAST_MODIFIED, X_WEAVE_TIMESTAMP};
 use syncstorage_db_common::util::SyncTimestamp;
 
+use crate::api::DOCKER_FLOW_ENDPOINTS;
 use crate::error::{ApiError, ApiErrorKind};
-use crate::web::DOCKER_FLOW_ENDPOINTS;
 
 pub struct WeaveTimestampMiddleware<S> {
     service: S,

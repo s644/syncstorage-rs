@@ -1,4 +1,4 @@
-use std::task::Context;
+use std::task::{Context, Poll};
 use std::{cell::RefCell, rc::Rc};
 
 use actix_web::{
@@ -6,9 +6,13 @@ use actix_web::{
     Error, HttpMessage,
 };
 use futures::future::{self, LocalBoxFuture, TryFutureExt};
-use std::task::Poll;
+use syncserver_web_common::middleware::{rejectua, sentry};
 
 use super::LogItems;
+use crate::{error::ApiError, ServerState};
+
+pub type RejectUA = rejectua::RejectUA<ServerState>;
+pub type SentryWrapper = sentry::SentryWrapper<ServerState, ApiError>;
 
 #[derive(Default)]
 pub struct LoggingWrapper;

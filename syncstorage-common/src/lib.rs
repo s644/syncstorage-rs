@@ -4,7 +4,7 @@ extern crate slog_scope;
 mod metrics;
 mod tags;
 
-pub use metrics::{metrics_from_opts, Metrics};
+pub use metrics::{statsd_client_from_opts, Metrics};
 pub use tags::Tags;
 
 use hkdf::Hkdf;

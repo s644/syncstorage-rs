@@ -2,12 +2,14 @@ use std::str::FromStr;
 
 use syncserver_settings::Settings as SyncserverSettings;
 use syncstorage_common::Metrics;
-use syncstorage_db_common::{params, util::SyncTimestamp, Db, Sorting, UserIdentifier};
+use syncstorage_db_common::{params, util::SyncTimestamp, Db, DbPool, Sorting, UserIdentifier};
+#[cfg(feature = "mysql")]
+use syncstorage_mysql::MysqlDbPool;
 use syncstorage_settings::Settings as SyncstorageSettings;
+#[cfg(feature = "spanner")]
+use syncstorage_spanner::SpannerDbPool;
 
-use crate::db::DbPool;
-use crate::error::ApiResult;
-use crate::{db::pool_from_settings, error::ApiError};
+use crate::error::{ApiError, ApiResult};
 
 pub type Result<T> = std::result::Result<T, ApiError>;
 
@@ -27,8 +29,13 @@ pub async fn db_pool(settings: Option<SyncstorageSettings>) -> Result<Box<dyn Db
     settings.database_use_test_transactions = use_test_transactions;
 
     let metrics = Metrics::noop();
-    let pool = pool_from_settings(&settings, &metrics).await?;
-    Ok(pool)
+    #[cfg(feature = "spanner")]
+    let pool = SpannerDbPool::new(&settings, &metrics).await?;
+
+    #[cfg(feature = "mysql")]
+    let pool = MysqlDbPool::new(&settings, &metrics)?;
+
+    Ok(Box::new(pool))
 }
 
 pub async fn test_db(pool: &dyn DbPool) -> ApiResult<Box<dyn Db<'_>>> {

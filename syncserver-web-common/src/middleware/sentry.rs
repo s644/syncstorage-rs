@@ -1,4 +1,5 @@
 use std::error::Error as StdError;
+use std::marker::PhantomData;
 use std::task::{Context, Poll};
 use std::{cell::RefCell, rc::Rc};
 
@@ -11,27 +12,35 @@ use futures::future::{self, LocalBoxFuture, TryFutureExt};
 use sentry::protocol::Event;
 use syncstorage_common::{Metrics, Tags};
 
-use crate::error::ApiError;
-use crate::server::ServerState;
-use crate::web::tags::TagsWrapper;
+use super::MetricError;
+use crate::tags::TagsWrapper;
 use sentry_backtrace::parse_stacktrace;
 
-pub struct SentryWrapper;
+pub struct SentryWrapper<T, E> {
+    _server_state: PhantomData<T>,
+    _error: PhantomData<E>,
+}
 
-impl SentryWrapper {
+impl<T, E> SentryWrapper<T, E> {
     pub fn new() -> Self {
-        SentryWrapper::default()
+        Self::default()
     }
 }
 
-impl Default for SentryWrapper {
+impl<T, E> Default for SentryWrapper<T, E> {
     fn default() -> Self {
-        Self
+        Self {
+            _server_state: PhantomData,
+            _error: PhantomData,
+        }
     }
 }
 
-impl<S, B> Transform<S> for SentryWrapper
+impl<T, E, S, B> Transform<S> for SentryWrapper<T, E>
 where
+    T: 'static,
+    E: MetricError + 'static,
+    for<'a> Metrics: From<&'a T>,
     S: Service<Request = ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
     S::Future: 'static,
     B: 'static,
@@ -40,19 +49,23 @@ where
     type Response = ServiceResponse<B>;
     type Error = Error;
     type InitError = ();
-    type Transform = SentryWrapperMiddleware<S>;
+    type Transform = SentryWrapperMiddleware<T, E, S>;
     type Future = LocalBoxFuture<'static, Result<Self::Transform, Self::InitError>>;
 
     fn new_transform(&self, service: S) -> Self::Future {
-        Box::pin(future::ok(SentryWrapperMiddleware {
+        Box::pin(future::ok(SentryWrapperMiddleware::<T, E, S> {
             service: Rc::new(RefCell::new(service)),
+            _server_state: PhantomData,
+            _error: PhantomData,
         }))
     }
 }
 
 #[derive(Debug)]
-pub struct SentryWrapperMiddleware<S> {
+pub struct SentryWrapperMiddleware<T, E, S> {
     service: Rc<RefCell<S>>,
+    _server_state: PhantomData<T>,
+    _error: PhantomData<E>,
 }
 
 pub fn report(tags: &Tags, mut event: Event<'static>) {
@@ -63,8 +76,11 @@ pub fn report(tags: &Tags, mut event: Event<'static>) {
     sentry::capture_event(event);
 }
 
-impl<S, B> Service for SentryWrapperMiddleware<S>
+impl<T, E, S, B> Service for SentryWrapperMiddleware<T, E, S>
 where
+    T: 'static,
+    for<'a> Metrics: From<&'a T>,
+    E: MetricError + 'static,
     S: Service<Request = ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
     S::Future: 'static,
     B: 'static,
@@ -81,9 +97,10 @@ where
     fn call(&mut self, sreq: ServiceRequest) -> Self::Future {
         let TagsWrapper(mut tags) = TagsWrapper::from(sreq.head());
         sreq.extensions_mut().insert(tags.clone());
-        let metrics = sreq
-            .app_data::<Data<ServerState>>()
-            .map(|state| Metrics::from(state.get_ref()));
+        let metrics: Option<Metrics> = sreq
+            .app_data::<Data<T>>()
+            // .map(|state| Metrics::from(state.get_ref()));
+            .map(|state| state.get_ref().into());
 
         Box::pin(self.service.call(sreq).and_then(move |mut sresp| {
             // handed an actix_error::error::Error;
@@ -134,17 +151,17 @@ where
                     }
                 }
                 Some(e) => {
-                    if let Some(apie) = e.as_error::<ApiError>() {
+                    if let Some(e) = e.as_error::<E>() {
                         if let Some(metrics) = metrics {
-                            if let Some(label) = apie.metric_label() {
+                            if let Some(label) = e.metric_label() {
                                 metrics.incr(&label);
                             }
                         }
-                        if !apie.is_reportable() {
-                            trace!("Sentry: Not reporting error: {:?}", apie);
+                        if !e.is_reportable() {
+                            trace!("Sentry: Not reporting error: {:?}", e);
                             return future::ok(sresp);
                         }
-                        report(&tags, event_from_error(apie));
+                        report(&tags, event_from_error(e));
                     }
                 }
             }
@@ -158,12 +175,15 @@ where
 /// `sentry::event_from_error` can't access `std::Error` backtraces as its
 /// `backtrace()` method is currently Rust nightly only. This function works
 /// against `HandlerError` instead to access its backtrace.
-pub fn event_from_error(err: &ApiError) -> Event<'static> {
+pub fn event_from_error<E>(err: &E) -> Event<'static>
+where
+    E: MetricError + 'static,
+{
     let mut exceptions = vec![exception_from_error_with_backtrace(err)];
 
     let mut source = err.source();
     while let Some(err) = source {
-        let exception = if let Some(err) = err.downcast_ref() {
+        let exception = if let Some(err) = err.downcast_ref::<E>() {
             exception_from_error_with_backtrace(err)
         } else {
             exception_from_error(err)
@@ -183,10 +203,10 @@ pub fn event_from_error(err: &ApiError) -> Event<'static> {
 /// Custom `exception_from_error` support function for `ApiError`
 ///
 /// Based moreso on sentry_failure's `exception_from_single_fail`.
-fn exception_from_error_with_backtrace(err: &ApiError) -> sentry::protocol::Exception {
+fn exception_from_error_with_backtrace(err: &impl MetricError) -> sentry::protocol::Exception {
     let mut exception = exception_from_error(err);
     // format the stack trace with alternate debug to get addresses
-    let bt = format!("{:#?}", err.backtrace);
+    let bt = format!("{:#?}", MetricError::backtrace(err));
     exception.stacktrace = parse_stacktrace(&bt);
     exception
 }

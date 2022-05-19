@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 async-trait = "0.1.40"
 backtrace = "0.3.61"
+cadence = "0.26"
 chrono = "0.4"
 # Pin to 0.5 for now, to keep it under tokio 0.2 (issue977).
 # Fix for #803 (deadpool#92) points to our fork for now
@@ -18,6 +19,7 @@ diesel_migrations = { version = "1.4.0", features = ["mysql"] }
 # `cargo build --features grpcio/openssl ...`
 grpcio = { version = "0.9" }
 http = "0.2.6"
+hostname = "0.3.1"
 futures = { version = "0.3", features = ["compat"] }
 lazy_static = "1.4.0"
 serde = "1.0"
@@ -26,4 +28,3 @@ syncstorage-common = { path = "../syncstorage-common" }
 thiserror = "1.0.26"
 # pinning to 0.2.4 due to high number of dependencies (actix, bb8, deadpool, etc.)
 tokio = { version = "0.2.4", features = ["macros", "sync", "blocking"] }
-url = "2.1"

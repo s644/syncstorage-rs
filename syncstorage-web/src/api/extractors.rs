@@ -36,14 +36,14 @@ use syncstorage_db_common::{
 use tokenserver_auth::TokenserverOrigin;
 use validator::{Validate, ValidationError};
 
-use crate::db::transaction::DbTransactionPool;
-use crate::error::{ApiError, ApiErrorKind};
-use crate::label;
-use crate::server::{metrics::MetricsWrapper, ServerState, BSO_ID_REGEX, COLLECTION_ID_REGEX};
-use crate::web::{
+use super::{
     auth::HawkPayload,
     error::{HawkErrorKind, ValidationErrorKind},
 };
+use crate::db::transaction::DbTransactionPool;
+use crate::error::{ApiError, ApiErrorKind};
+use crate::label;
+use crate::{metrics::MetricsWrapper, ServerState, BSO_ID_REGEX, COLLECTION_ID_REGEX};
 const BATCH_MAX_IDS: usize = 100;
 
 // BSO const restrictions
@@ -484,7 +484,8 @@ impl BsoParam {
                 RequestErrorLocation::Path,
                 Some("bso".to_owned()),
                 label!("request.process.invalid_bso"),
-            ))?;
+            )
+            .into());
         }
         if let Some(v) = elements.get(5) {
             let sv = urldecode(&String::from_str(v).map_err(|e| {
@@ -513,7 +514,8 @@ impl BsoParam {
                 RequestErrorLocation::Path,
                 Some("bso".to_owned()),
                 label!("request.process.missing_bso"),
-            ))?
+            )
+            .into())
         }
     }
 
@@ -581,7 +583,8 @@ impl CollectionParam {
                 RequestErrorLocation::Path,
                 Some("collection".to_owned()),
                 label!("request.process.missing_collection"),
-            ))?
+            )
+            .into())
         }
     }
 
@@ -621,7 +624,8 @@ impl FromRequest for CollectionParam {
                     RequestErrorLocation::Path,
                     Some("collection".to_owned()),
                     label!("request.process.missing_collection"),
-                ))?
+                )
+                .into())
             }
         })
     }
@@ -926,29 +930,22 @@ impl FromRequest for BsoPutRequest {
     }
 }
 
-#[derive(Clone, Copy, Debug, Serialize)]
-pub struct QuotaInfo {
-    pub enabled: bool,
-    pub size: u32,
+#[derive(Clone, Copy, Serialize)]
+pub enum DbStatus {
+    Ok,
+    Err,
+    Unknown,
 }
 
-#[derive(Clone, Debug)]
-pub struct HeartbeatRequest {
-    pub headers: HeaderMap,
-    pub db_pool: Box<dyn DbPool>,
-    pub quota: QuotaInfo,
-}
-
-impl FromRequest for HeartbeatRequest {
+impl FromRequest for DbStatus {
     type Config = ();
-    type Error = Error;
+    type Error = ApiError;
     type Future = LocalBoxFuture<'static, Result<Self, Self::Error>>;
 
-    fn from_request(req: &HttpRequest, _: &mut Payload) -> Self::Future {
+    fn from_request(req: &HttpRequest, _payload: &mut Payload) -> Self::Future {
         let req = req.clone();
 
-        async move {
-            let headers = req.headers().clone();
+        Box::pin(async move {
             let state = match req.app_data::<Data<ServerState>>() {
                 Some(s) => s,
                 None => {
@@ -963,35 +960,54 @@ impl FromRequest for HeartbeatRequest {
                 }
             };
             let db_pool = state.db_pool.clone();
-            let quota = QuotaInfo {
-                enabled: state.quota_enabled,
-                size: state.limits.max_quota_limit,
-            };
+            let db = db_pool.get().await?;
 
-            Ok(HeartbeatRequest {
-                headers,
-                db_pool,
-                quota,
-            })
-        }
-        .boxed_local()
+            match db.check().await {
+                Ok(true) => Ok(Self::Ok),
+                Ok(false) => Ok(Self::Err),
+                Err(e) => {
+                    error!("Heartbeat error: {:?}", e);
+                    Ok(Self::Unknown)
+                }
+            }
+        })
     }
 }
 
-#[derive(Debug)]
-pub struct TestErrorRequest {
-    pub headers: HeaderMap,
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct QuotaInfo {
+    pub enabled: bool,
+    pub size: u32,
 }
 
-impl FromRequest for TestErrorRequest {
+impl FromRequest for QuotaInfo {
     type Config = ();
     type Error = Error;
     type Future = LocalBoxFuture<'static, Result<Self, Self::Error>>;
 
     fn from_request(req: &HttpRequest, _: &mut Payload) -> Self::Future {
-        let headers = req.headers().clone();
+        let req = req.clone();
 
-        Box::pin(future::ok(TestErrorRequest { headers }))
+        Box::pin(async move {
+            let state = match req.app_data::<Data<ServerState>>() {
+                Some(s) => s,
+                None => {
+                    error!("⚠️ Could not load the app state");
+                    return Err(ValidationErrorKind::FromDetails(
+                        "Internal error".to_owned(),
+                        RequestErrorLocation::Unknown,
+                        Some("state".to_owned()),
+                        None,
+                    )
+                    .into());
+                }
+            };
+
+            Ok(QuotaInfo {
+                enabled: state.quota_enabled,
+                size: state.limits.max_quota_limit,
+            })
+        })
     }
 }
 
@@ -1055,7 +1071,8 @@ impl HawkIdentifier {
                 RequestErrorLocation::Path,
                 Some("uid".to_owned()),
                 label!("request.validate.hawk.missing_uid"),
-            ))?
+            )
+            .into())
         }
     }
 
@@ -1103,12 +1120,13 @@ impl HawkIdentifier {
         let puid = Self::uid_from_path(uri)?;
         if payload.user_id != puid {
             warn!("⚠️ Hawk UID not in URI: {:?} {:?}", payload.user_id, uri);
-            Err(ValidationErrorKind::FromDetails(
+            return Err(ValidationErrorKind::FromDetails(
                 "conflicts with payload".to_owned(),
                 RequestErrorLocation::Path,
                 Some("uid".to_owned()),
                 label!("request.validate.hawk.uri_missing_uid"),
-            ))?;
+            )
+            .into());
         }
 
         // Store the origin of the token so we can later use it as a tag when emitting metrics
@@ -1472,7 +1490,6 @@ impl FromRequest for BatchRequestOpt {
 pub enum PreConditionHeader {
     IfModifiedSince(SyncTimestamp),
     IfUnmodifiedSince(SyncTimestamp),
-    NoHeader,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1749,10 +1766,9 @@ mod tests {
     use syncstorage_settings::{Deadman, ServerLimits, Settings as SyncstorageSettings};
     use tokio::sync::RwLock;
 
+    use crate::api::auth::HawkPayload;
     use crate::db::mock::{MockDb, MockDbPool};
-    use crate::server::ServerState;
-
-    use crate::web::auth::HawkPayload;
+    use crate::ServerState;
 
     lazy_static! {
         static ref SERVER_LIMITS: Arc<ServerLimits> = Arc::new(ServerLimits::default());
@@ -1779,9 +1795,8 @@ mod tests {
             db_pool: Box::new(MockDbPool::new()),
             limits: Arc::clone(&SERVER_LIMITS),
             limits_json: serde_json::to_string(&**SERVER_LIMITS).unwrap(),
-            port: 8000,
-            metrics: Box::new(
-                syncstorage_common::metrics_from_opts(
+            statsd_client: Box::new(
+                syncstorage_common::statsd_client_from_opts(
                     &syncstorage_settings.statsd_label,
                     syncserver_settings.statsd_host.as_deref(),
                     syncserver_settings.statsd_port,

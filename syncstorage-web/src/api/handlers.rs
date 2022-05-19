@@ -2,9 +2,9 @@
 use std::collections::HashMap;
 use std::convert::Into;
 
-use actix_web::{dev::HttpResponseBuilder, http::StatusCode, web::Data, HttpRequest, HttpResponse};
+use actix_web::{http::StatusCode, web::Data, HttpRequest, HttpResponse};
 use serde::Serialize;
-use serde_json::{json, Map, Value};
+use serde_json::{json, Value};
 use syncstorage_common::{X_LAST_MODIFIED, X_WEAVE_NEXT_OFFSET, X_WEAVE_RECORDS};
 use syncstorage_db_common::{
     error::{DbError, DbErrorKind},
@@ -12,17 +12,15 @@ use syncstorage_db_common::{
     results::{CreateBatch, Paginated},
     Db,
 };
-use time;
 
 use crate::{
+    api::extractors::{
+        BsoPutRequest, BsoRequest, CollectionPostRequest, CollectionRequest, EmitApiMetric,
+        MetaRequest, ReplyFormat,
+    },
     db::transaction::DbTransactionPool,
     error::{ApiError, ApiErrorKind},
-    server::ServerState,
-    tokenserver,
-    web::extractors::{
-        BsoPutRequest, BsoRequest, CollectionPostRequest, CollectionRequest, EmitApiMetric,
-        HeartbeatRequest, MetaRequest, ReplyFormat, TestErrorRequest,
-    },
+    ServerState,
 };
 
 pub const ONE_KB: f64 = 1024.0;
@@ -533,177 +531,4 @@ pub fn get_configuration(state: Data<ServerState>) -> HttpResponse {
         .header(X_LAST_MODIFIED, "0.00")
         .content_type("application/json")
         .body(&state.limits_json)
-}
-
-/** Returns a status message indicating the state of the current server
- *
- */
-pub async fn heartbeat(hb: HeartbeatRequest, req: HttpRequest) -> Result<HttpResponse, ApiError> {
-    let mut checklist = HashMap::new();
-    checklist.insert(
-        "version".to_owned(),
-        Value::String(env!("CARGO_PKG_VERSION").to_owned()),
-    );
-    let db = hb.db_pool.get().await?;
-
-    checklist.insert("quota".to_owned(), serde_json::to_value(hb.quota)?);
-
-    let tokenserver_state = match req.app_data::<Data<Option<tokenserver::ServerState>>>() {
-        Some(s) => s,
-        None => {
-            error!("⚠️ Could not load the app state");
-            return Ok(HttpResponse::InternalServerError().body(""));
-        }
-    };
-
-    let mut tokenserver_service_unavailable = false;
-    if let Some(tokenserver_state) = tokenserver_state.as_ref() {
-        let db = tokenserver_state
-            .db_pool
-            .get()
-            .await
-            .map_err(ApiError::from)?;
-        let mut tokenserver_checklist = Map::new();
-
-        match db.check().await {
-            Ok(result) => {
-                if result {
-                    tokenserver_checklist.insert("database".to_owned(), Value::from("Ok"));
-                } else {
-                    tokenserver_checklist.insert("database".to_owned(), Value::from("Err"));
-                    tokenserver_checklist.insert(
-                        "database_msg".to_owned(),
-                        Value::from("check failed without error"),
-                    );
-                };
-                let status = if result { "Ok" } else { "Err" };
-                tokenserver_checklist.insert("status".to_owned(), Value::from(status));
-            }
-            Err(e) => {
-                error!("Heartbeat error: {:?}", e);
-                tokenserver_checklist.insert("status".to_owned(), Value::from("Err"));
-                tokenserver_checklist.insert("database".to_owned(), Value::from("Unknown"));
-                tokenserver_service_unavailable = true;
-            }
-        }
-
-        checklist.insert("tokenserver".to_owned(), Value::from(tokenserver_checklist));
-    }
-
-    match db.check().await {
-        Ok(result) => {
-            if result {
-                checklist.insert("database".to_owned(), Value::from("Ok"));
-            } else {
-                checklist.insert("database".to_owned(), Value::from("Err"));
-                checklist.insert(
-                    "database_msg".to_owned(),
-                    Value::from("check failed without error"),
-                );
-            };
-            let status = if result { "Ok" } else { "Err" };
-            checklist.insert("status".to_owned(), Value::from(status));
-
-            if tokenserver_service_unavailable {
-                Ok(HttpResponse::ServiceUnavailable().json(checklist))
-            } else {
-                Ok(HttpResponse::Ok().json(checklist))
-            }
-        }
-        Err(e) => {
-            error!("Heartbeat error: {:?}", e);
-            checklist.insert("status".to_owned(), Value::from("Err"));
-            checklist.insert("database".to_owned(), Value::from("Unknown"));
-            Ok(HttpResponse::ServiceUnavailable().json(checklist))
-        }
-    }
-}
-
-pub async fn lbheartbeat(req: HttpRequest) -> Result<HttpResponse, ApiError> {
-    let mut resp: HashMap<String, Value> = HashMap::new();
-
-    let state = match req.app_data::<Data<ServerState>>() {
-        Some(s) => s,
-        None => {
-            error!("⚠️ Could not load the app state");
-            return Ok(HttpResponse::InternalServerError().body(""));
-        }
-    };
-
-    let deadarc = state.deadman.clone();
-    let mut deadman = *deadarc.read().await;
-    let db_state = if cfg!(test) {
-        use actix_web::http::header::HeaderValue;
-        use std::str::FromStr;
-        use syncstorage_db_common::PoolState;
-
-        let test_pool = PoolState {
-            connections: u32::from_str(
-                req.headers()
-                    .get("TEST_CONNECTIONS")
-                    .unwrap_or(&HeaderValue::from_static("0"))
-                    .to_str()
-                    .unwrap_or("0"),
-            )
-            .unwrap_or_default(),
-            idle_connections: u32::from_str(
-                req.headers()
-                    .get("TEST_IDLES")
-                    .unwrap_or(&HeaderValue::from_static("0"))
-                    .to_str()
-                    .unwrap_or("0"),
-            )
-            .unwrap_or_default(),
-        };
-        // dbg!(&test_pool, deadman.max_size);
-        test_pool
-    } else {
-        state.db_pool.clone().state()
-    };
-
-    let active = db_state.connections - db_state.idle_connections;
-    let mut status_code = StatusCode::OK;
-
-    if let Some(max_size) = deadman.max_size {
-        if active >= max_size && db_state.idle_connections == 0 {
-            if deadman.clock_start.is_none() {
-                deadman.clock_start = Some(time::Instant::now());
-            }
-            status_code = StatusCode::INTERNAL_SERVER_ERROR;
-        } else if deadman.clock_start.is_some() {
-            deadman.clock_start = None
-        }
-        deadman.previous_count = db_state.idle_connections as usize;
-        {
-            *deadarc.write().await = deadman;
-        }
-        resp.insert("active_connections".to_string(), Value::from(active));
-        resp.insert(
-            "idle_connections".to_string(),
-            Value::from(db_state.idle_connections),
-        );
-        if let Some(clock) = deadman.clock_start {
-            let duration: time::Duration = time::Instant::now() - clock;
-            resp.insert(
-                "duration_ms".to_string(),
-                Value::from(duration.whole_milliseconds()),
-            );
-        };
-    }
-
-    Ok(HttpResponseBuilder::new(status_code).json(json!(resp)))
-}
-
-// try returning an API error
-pub async fn test_error(
-    _req: HttpRequest,
-    _ter: TestErrorRequest,
-) -> Result<HttpResponse, ApiError> {
-    // generate an error for sentry.
-
-    // ApiError will call the middleware layer to auto-append the tags.
-    error!("Test Error");
-    let err = ApiError::from(ApiErrorKind::Internal("Oh Noes!".to_owned()));
-
-    Err(err)
 }

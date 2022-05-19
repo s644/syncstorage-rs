@@ -4,12 +4,14 @@ pub mod results;
 pub mod test;
 pub mod util;
 
-use std::fmt::Debug;
+use std::{fmt::Debug, time::Duration};
 
 use async_trait::async_trait;
+use cadence::{Gauged, StatsdClient};
 use futures::future::{self, LocalBoxFuture, TryFutureExt};
 use lazy_static::lazy_static;
 use serde::Deserialize;
+use tokio::time;
 
 use error::DbError;
 use util::SyncTimestamp;
@@ -307,4 +309,38 @@ impl From<u32> for UserIdentifier {
             ..Default::default()
         }
     }
+}
+
+/// Emit DbPool metrics periodically
+pub fn spawn_pool_periodic_reporter<T: GetPoolState + Send + 'static>(
+    interval: Duration,
+    metrics: StatsdClient,
+    pool: T,
+) -> Result<(), DbError> {
+    let hostname = hostname::get()
+        .expect("Couldn't get hostname")
+        .into_string()
+        .expect("Couldn't get hostname");
+    tokio::spawn(async move {
+        loop {
+            let PoolState {
+                connections,
+                idle_connections,
+            } = pool.state();
+            metrics
+                .gauge_with_tags(
+                    "storage.pool.connections.active",
+                    (connections - idle_connections) as u64,
+                )
+                .with_tag("hostname", &hostname)
+                .send();
+            metrics
+                .gauge_with_tags("storage.pool.connections.idle", idle_connections as u64)
+                .with_tag("hostname", &hostname)
+                .send();
+            time::delay_for(interval).await;
+        }
+    });
+
+    Ok(())
 }

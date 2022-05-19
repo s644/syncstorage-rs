@@ -17,7 +17,7 @@ use hex;
 use hmac::{Hmac, Mac, NewMac};
 use lazy_static::lazy_static;
 use regex::Regex;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use syncserver_settings::Secrets;
 use tokenserver_common::{
@@ -28,7 +28,6 @@ use tokenserver_mysql::{models::Db, params, pool::DbPool, results};
 
 use super::{LogItemsMutator, ServerState, TokenserverMetrics};
 use crate::error::ApiError;
-use crate::server::metrics;
 
 lazy_static! {
     static ref CLIENT_STATE_REGEX: Regex = Regex::new("^[a-zA-Z0-9._-]{1,32}$").unwrap();
@@ -210,10 +209,10 @@ impl FromRequest for TokenserverRequest {
                             .id,
                         )
                     } else {
-                        return Err(TokenserverError::unsupported(
+                        return Err(ApiError::from(TokenserverError::unsupported(
                             "Unsupported application version",
                             version.to_owned(),
-                        )
+                        ))
                         .into());
                     }
                 } else {
@@ -222,10 +221,10 @@ impl FromRequest for TokenserverRequest {
                     // "application" in the error message. To keep the APIs between the old and
                     // new Tokenservers as close as possible, we defer to the error message from
                     // the old Tokenserver.
-                    return Err(TokenserverError::unsupported(
+                    return Err(ApiError::from(TokenserverError::unsupported(
                         "Unsupported application",
                         "application".to_owned(),
-                    )
+                    ))
                     .into());
                 }
             };
@@ -268,7 +267,7 @@ impl FromRequest for TokenserverRequest {
                 node_type: state.node_type,
             };
 
-            tokenserver_request.validate()?;
+            tokenserver_request.validate().map_err(ApiError::from)?;
 
             Ok(tokenserver_request)
         })
@@ -284,7 +283,7 @@ pub struct DbWrapper(pub Box<dyn Db>);
 
 impl FromRequest for DbWrapper {
     type Config = ();
-    type Error = Error;
+    type Error = ApiError;
     type Future = LocalBoxFuture<'static, Result<Self, Self::Error>>;
 
     fn from_request(req: &HttpRequest, _payload: &mut Payload) -> Self::Future {
@@ -312,7 +311,7 @@ struct DbPoolWrapper(Box<dyn DbPool>);
 
 impl FromRequest for DbPoolWrapper {
     type Config = ();
-    type Error = Error;
+    type Error = ApiError;
     type Future = LocalBoxFuture<'static, Result<Self, Self::Error>>;
 
     fn from_request(req: &HttpRequest, _payload: &mut Payload) -> Self::Future {
@@ -337,7 +336,7 @@ pub enum Token {
 
 impl FromRequest for Token {
     type Config = ();
-    type Error = Error;
+    type Error = ApiError;
     type Future = LocalBoxFuture<'static, Result<Self, Self::Error>>;
 
     fn from_request(req: &HttpRequest, _payload: &mut Payload) -> Self::Future {
@@ -409,7 +408,7 @@ pub struct AuthData {
 
 impl FromRequest for AuthData {
     type Config = ();
-    type Error = Error;
+    type Error = ApiError;
     type Future = LocalBoxFuture<'static, Result<Self, Self::Error>>;
 
     fn from_request(req: &HttpRequest, _payload: &mut Payload) -> Self::Future {
@@ -476,7 +475,7 @@ struct XClientStateHeader(Option<String>);
 
 impl FromRequest for XClientStateHeader {
     type Config = ();
-    type Error = Error;
+    type Error = ApiError;
     type Future = LocalBoxFuture<'static, Result<Self, Self::Error>>;
 
     fn from_request(req: &HttpRequest, _payload: &mut Payload) -> Self::Future {
@@ -518,7 +517,7 @@ struct KeyId {
 
 impl FromRequest for KeyId {
     type Config = ();
-    type Error = Error;
+    type Error = ApiError;
     type Future = LocalBoxFuture<'static, Result<Self, Self::Error>>;
 
     fn from_request(req: &HttpRequest, _payload: &mut Payload) -> Self::Future {
@@ -597,7 +596,7 @@ impl FromRequest for KeyId {
 
 impl FromRequest for TokenserverMetrics {
     type Config = ();
-    type Error = Error;
+    type Error = ApiError;
     type Future = Ready<Result<Self, Self::Error>>;
 
     fn from_request(req: &HttpRequest, _payload: &mut Payload) -> Self::Future {
@@ -608,35 +607,66 @@ impl FromRequest for TokenserverMetrics {
             Err(e) => return future::err(e),
         };
 
-        future::ok(TokenserverMetrics(metrics::metrics_from_request(
-            req,
-            Some(state.metrics.clone()),
-        )))
+        future::ok(TokenserverMetrics(
+            syncserver_web_common::metrics_from_request(req, Some(state.statsd_client.clone())),
+        ))
     }
 }
 
-fn get_server_state(req: &HttpRequest) -> Result<&Data<Option<ServerState>>, Error> {
+#[derive(Clone, Copy, Serialize)]
+pub enum DbStatus {
+    Ok,
+    Err,
+    Unknown,
+}
+
+impl FromRequest for DbStatus {
+    type Config = ();
+    type Error = ApiError;
+    type Future = LocalBoxFuture<'static, Result<Self, Self::Error>>;
+
+    fn from_request(req: &HttpRequest, _payload: &mut Payload) -> Self::Future {
+        let req = req.clone();
+
+        Box::pin(async move {
+            let DbWrapper(db) = DbWrapper::extract(&req).await?;
+
+            match db.check().await {
+                Ok(true) => Ok(Self::Ok),
+                Ok(false) => Ok(Self::Err),
+                Err(e) => {
+                    error!("Heartbeat error: {:?}", e);
+                    Ok(Self::Unknown)
+                }
+            }
+        })
+    }
+}
+
+fn get_server_state(req: &HttpRequest) -> Result<&Data<Option<ServerState>>, ApiError> {
     req.app_data::<Data<Option<ServerState>>>().ok_or_else(|| {
-        Error::from(TokenserverError {
+        TokenserverError {
             context: "Failed to load the application state".to_owned(),
             ..TokenserverError::internal_error()
-        })
+        }
+        .into()
     })
 }
 
-fn get_secret(req: &HttpRequest) -> Result<String, Error> {
+fn get_secret(req: &HttpRequest) -> Result<String, ApiError> {
     let secrets = req.app_data::<Data<Arc<Secrets>>>().ok_or_else(|| {
-        Error::from(TokenserverError {
+        ApiError::from(TokenserverError {
             context: "Failed to load the application secrets".to_owned(),
             ..TokenserverError::internal_error()
         })
     })?;
 
     String::from_utf8(secrets.master_secret.clone()).map_err(|e| {
-        Error::from(TokenserverError {
+        TokenserverError {
             context: format!("Failed to read the master secret: {}", e),
             ..TokenserverError::internal_error()
-        })
+        }
+        .into()
     })
 }
 
@@ -664,7 +694,7 @@ mod tests {
         dev::ServiceResponse,
         http::{Method, StatusCode},
         test::{self, TestRequest},
-        HttpResponse,
+        HttpResponse, ResponseError,
     };
     use futures::executor::block_on;
     use lazy_static::lazy_static;
@@ -675,7 +705,7 @@ mod tests {
     use tokenserver_mysql::mock::MockDbPool as MockTokenserverPool;
     use tokenserver_settings::Settings as TokenserverSettings;
 
-    use crate::tokenserver::ServerState;
+    use crate::ServerState;
 
     use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -774,7 +804,7 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
-        let expected_error = TokenserverError::invalid_credentials("Unauthorized");
+        let expected_error = ApiError::from(TokenserverError::invalid_credentials("Unauthorized"));
         let body = extract_body_as_str(ServiceResponse::new(request, response));
         assert_eq!(body, serde_json::to_string(&expected_error).unwrap());
     }
@@ -819,8 +849,10 @@ mod tests {
 
             assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
-            let expected_error =
-                TokenserverError::unsupported("Unsupported application version", "1.0".to_owned());
+            let expected_error = ApiError::from(TokenserverError::unsupported(
+                "Unsupported application version",
+                "1.0".to_owned(),
+            ));
             let body = extract_body_as_str(ServiceResponse::new(request, response));
             assert_eq!(body, serde_json::to_string(&expected_error).unwrap());
         }
@@ -839,8 +871,10 @@ mod tests {
 
             assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
-            let expected_error =
-                TokenserverError::unsupported("Unsupported application", "application".to_owned());
+            let expected_error = ApiError::from(TokenserverError::unsupported(
+                "Unsupported application",
+                "application".to_owned(),
+            ));
             let body = extract_body_as_str(ServiceResponse::new(request, response));
             assert_eq!(body, serde_json::to_string(&expected_error).unwrap());
         }
@@ -859,8 +893,10 @@ mod tests {
 
             assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
-            let expected_error =
-                TokenserverError::unsupported("Unsupported application", "application".to_owned());
+            let expected_error = ApiError::from(TokenserverError::unsupported(
+                "Unsupported application",
+                "application".to_owned(),
+            ));
             let body = extract_body_as_str(ServiceResponse::new(request, response));
             assert_eq!(body, serde_json::to_string(&expected_error).unwrap());
         }
@@ -907,10 +943,11 @@ mod tests {
         // Request with no X-KeyID header
         {
             let request = build_request().to_http_request();
-            let response: HttpResponse = KeyId::extract(&request).await.unwrap_err().into();
+            let response = KeyId::extract(&request).await.unwrap_err().error_response();
             assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
-            let expected_error = TokenserverError::invalid_key_id("Missing X-KeyID header");
+            let expected_error =
+                ApiError::from(TokenserverError::invalid_key_id("Missing X-KeyID header"));
             let body = extract_body_as_str(ServiceResponse::new(request, response));
             assert_eq!(body, serde_json::to_string(&expected_error).unwrap());
         }
@@ -920,10 +957,11 @@ mod tests {
             let request = build_request()
                 .header("x-keyid", "\u{200B}")
                 .to_http_request();
-            let response: HttpResponse = KeyId::extract(&request).await.unwrap_err().into();
+            let response = KeyId::extract(&request).await.unwrap_err().error_response();
             assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
-            let expected_error = TokenserverError::invalid_key_id("Invalid X-KeyID header");
+            let expected_error =
+                ApiError::from(TokenserverError::invalid_key_id("Invalid X-KeyID header"));
             let body = extract_body_as_str(ServiceResponse::new(request, response));
             assert_eq!(body, serde_json::to_string(&expected_error).unwrap());
         }
@@ -933,10 +971,11 @@ mod tests {
             let request = build_request()
                 .header("x-keyid", "00000000")
                 .to_http_request();
-            let response: HttpResponse = KeyId::extract(&request).await.unwrap_err().into();
+            let response = KeyId::extract(&request).await.unwrap_err().error_response();
             assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
-            let expected_error = TokenserverError::invalid_credentials("Unauthorized");
+            let expected_error =
+                ApiError::from(TokenserverError::invalid_credentials("Unauthorized"));
             let body = extract_body_as_str(ServiceResponse::new(request, response));
             assert_eq!(body, serde_json::to_string(&expected_error).unwrap());
         }
@@ -946,10 +985,11 @@ mod tests {
             let request = build_request()
                 .header("x-keyid", "0000000001234-notbase64")
                 .to_http_request();
-            let response: HttpResponse = KeyId::extract(&request).await.unwrap_err().into();
+            let response = KeyId::extract(&request).await.unwrap_err().error_response();
             assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
-            let expected_error = TokenserverError::invalid_credentials("Unauthorized");
+            let expected_error =
+                ApiError::from(TokenserverError::invalid_credentials("Unauthorized"));
             let body = extract_body_as_str(ServiceResponse::new(request, response));
             assert_eq!(body, serde_json::to_string(&expected_error).unwrap());
         }
@@ -959,10 +999,11 @@ mod tests {
             let request = build_request()
                 .header("x-keyid", &[0xFFu8, 0xFFu8, 0xFFu8, 0xFFu8][..])
                 .to_http_request();
-            let response: HttpResponse = KeyId::extract(&request).await.unwrap_err().into();
+            let response = KeyId::extract(&request).await.unwrap_err().error_response();
             assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
-            let expected_error = TokenserverError::invalid_key_id("Invalid X-KeyID header");
+            let expected_error =
+                ApiError::from(TokenserverError::invalid_key_id("Invalid X-KeyID header"));
             let body = extract_body_as_str(ServiceResponse::new(request, response));
             assert_eq!(body, serde_json::to_string(&expected_error).unwrap());
         }
@@ -972,10 +1013,11 @@ mod tests {
             let request = build_request()
                 .header("x-keyid", "notanumber-qqo")
                 .to_http_request();
-            let response: HttpResponse = KeyId::extract(&request).await.unwrap_err().into();
+            let response = KeyId::extract(&request).await.unwrap_err().error_response();
             assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
-            let expected_error = TokenserverError::invalid_credentials("Unauthorized");
+            let expected_error =
+                ApiError::from(TokenserverError::invalid_credentials("Unauthorized"));
             let body = extract_body_as_str(ServiceResponse::new(request, response));
             assert_eq!(body, serde_json::to_string(&expected_error).unwrap());
         }
@@ -986,14 +1028,14 @@ mod tests {
                 .header("x-keyid", "0000000001234-qqo")
                 .header("x-client-state", "bbbb")
                 .to_http_request();
-            let response: HttpResponse = KeyId::extract(&request).await.unwrap_err().into();
+            let response = KeyId::extract(&request).await.unwrap_err().error_response();
             assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
-            let expected_error = TokenserverError {
+            let expected_error = ApiError::from(TokenserverError {
                 status: "invalid-client-state",
                 location: ErrorLocation::Body,
                 ..TokenserverError::default()
-            };
+            });
             let body = extract_body_as_str(ServiceResponse::new(request, response));
             assert_eq!(body, serde_json::to_string(&expected_error).unwrap());
         }
@@ -1289,8 +1331,8 @@ mod tests {
             node_capacity_release_rate: None,
             node_type: NodeType::default(),
             service_id: None,
-            metrics: Box::new(
-                syncstorage_common::metrics_from_opts(
+            statsd_client: Box::new(
+                syncstorage_common::statsd_client_from_opts(
                     &tokenserver_settings.statsd_label,
                     syncserver_settings.statsd_host.as_deref(),
                     syncserver_settings.statsd_port,

@@ -1,13 +1,25 @@
+#[macro_use]
+extern crate slog_scope;
+
+pub mod error;
 pub mod extractors;
 pub mod handlers;
-pub mod logging;
+pub mod middleware;
 
-use actix_web::{dev::RequestHead, http::header::USER_AGENT, HttpRequest};
+use std::time::Duration;
+
+use actix_web::{
+    dev::RequestHead,
+    http::header::USER_AGENT,
+    web::{self, ServiceConfig},
+    HttpRequest,
+};
 use cadence::StatsdClient;
 use serde::{
     ser::{SerializeMap, Serializer},
     Serialize,
 };
+use syncserver_web_common::user_agent;
 use syncstorage_common::Metrics;
 use tokenserver_auth::{browserid, oauth, VerifyToken};
 use tokenserver_common::NodeType;
@@ -17,9 +29,41 @@ use tokenserver_mysql::{
 };
 use tokenserver_settings::Settings;
 
-use crate::{error::ApiError, server::user_agent};
+use crate::error::ApiError;
 
 use std::{collections::HashMap, convert::TryFrom, fmt};
+
+pub fn build_configurator<'a>(
+    settings: &'a Settings,
+    statsd_host: Option<&'a str>,
+    statsd_port: u16,
+) -> Result<impl Fn(&mut ServiceConfig) + Copy + 'a, ApiError> {
+    Ok(move |cfg: &mut ServiceConfig| {
+        let statsd_client = syncstorage_common::statsd_client_from_opts(
+            &settings.statsd_label,
+            statsd_host,
+            statsd_port,
+        )
+        .unwrap();
+        // .map_err(|e| TokenserverError {
+        //     context: e,
+        //     ..TokenserverError::internal_error()
+        // })?;
+        let state = ServerState::from_settings(settings, statsd_client.clone()).unwrap();
+
+        syncstorage_db_common::spawn_pool_periodic_reporter(
+            Duration::from_secs(10),
+            statsd_client,
+            state.db_pool.clone(),
+        )
+        .unwrap(); // TODO: remove unwrap
+
+        cfg.data(state).service(
+            web::resource("/1.0/{application}/{version}")
+                .route(web::get().to(handlers::get_tokenserver_result)),
+        );
+    })
+}
 
 #[derive(Clone)]
 pub struct ServerState {
@@ -31,11 +75,14 @@ pub struct ServerState {
     pub node_capacity_release_rate: Option<f32>,
     pub node_type: NodeType,
     pub service_id: Option<i32>,
-    pub metrics: Box<StatsdClient>,
+    pub statsd_client: Box<StatsdClient>,
 }
 
 impl ServerState {
-    pub fn from_settings(settings: &Settings, metrics: StatsdClient) -> Result<Self, ApiError> {
+    pub fn from_settings(
+        settings: &Settings,
+        statsd_client: StatsdClient,
+    ) -> Result<Self, ApiError> {
         let oauth_verifier = Box::new(
             oauth::RemoteVerifier::try_from(settings)
                 .expect("failed to create Tokenserver OAuth verifier"),
@@ -46,31 +93,35 @@ impl ServerState {
         );
         let use_test_transactions = false;
 
-        TokenserverPool::new(settings, &Metrics::from(&metrics), use_test_transactions)
-            .map(|db_pool| {
-                let service_id = db_pool
-                    .get_sync()
-                    .and_then(|db| {
-                        db.get_service_id_sync(params::GetServiceId {
-                            service: "sync-1.5".to_owned(),
-                        })
+        TokenserverPool::new(
+            settings,
+            &Metrics::from(&statsd_client),
+            use_test_transactions,
+        )
+        .map(|db_pool| {
+            let service_id = db_pool
+                .get_sync()
+                .and_then(|db| {
+                    db.get_service_id_sync(params::GetServiceId {
+                        service: "sync-1.5".to_owned(),
                     })
-                    .ok()
-                    .map(|result| result.id);
+                })
+                .ok()
+                .map(|result| result.id);
 
-                ServerState {
-                    fxa_email_domain: settings.fxa_email_domain.clone(),
-                    fxa_metrics_hash_secret: settings.fxa_metrics_hash_secret.clone(),
-                    oauth_verifier,
-                    browserid_verifier,
-                    db_pool: Box::new(db_pool),
-                    node_capacity_release_rate: settings.node_capacity_release_rate,
-                    node_type: settings.node_type,
-                    metrics: Box::new(metrics),
-                    service_id,
-                }
-            })
-            .map_err(Into::into)
+            ServerState {
+                fxa_email_domain: settings.fxa_email_domain.clone(),
+                fxa_metrics_hash_secret: settings.fxa_metrics_hash_secret.clone(),
+                oauth_verifier,
+                browserid_verifier,
+                db_pool: Box::new(db_pool),
+                node_capacity_release_rate: settings.node_capacity_release_rate,
+                node_type: settings.node_type,
+                statsd_client: Box::new(statsd_client),
+                service_id,
+            }
+        })
+        .map_err(Into::into)
     }
 }
 

@@ -1,10 +1,6 @@
 use std::fmt;
 
-use actix_web::{http::StatusCode, HttpResponse, ResponseError};
-use serde::{
-    ser::{SerializeMap, Serializer},
-    Serialize,
-};
+use http::StatusCode;
 use thiserror::Error;
 
 #[derive(Clone, Debug, Error, PartialEq)]
@@ -148,70 +144,11 @@ impl fmt::Display for ErrorLocation {
     }
 }
 
-impl ResponseError for TokenserverError {
-    fn error_response(&self) -> HttpResponse {
-        HttpResponse::build(self.http_status).json(ErrorResponse::from(self))
-    }
-
-    fn status_code(&self) -> StatusCode {
-        self.http_status
-    }
-}
-
-struct ErrorResponse {
-    status: &'static str,
-    errors: [ErrorInstance; 1],
-}
-
-struct ErrorInstance {
-    location: ErrorLocation,
-    name: String,
-    description: &'static str,
-}
-
-impl From<&TokenserverError> for ErrorResponse {
-    fn from(error: &TokenserverError) -> Self {
-        ErrorResponse {
-            status: error.status,
-            errors: [ErrorInstance {
-                location: error.location,
-                name: error.name.clone(),
-                description: error.description,
-            }],
-        }
-    }
-}
-
-impl Serialize for ErrorInstance {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut map = serializer.serialize_map(Some(3))?;
-        map.serialize_entry("location", &self.location.to_string())?;
-        map.serialize_entry("name", &self.name)?;
-        map.serialize_entry("description", &self.description)?;
-        map.end()
-    }
-}
-
-impl Serialize for ErrorResponse {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut map = serializer.serialize_map(Some(2))?;
-        map.serialize_entry("status", &self.status)?;
-        map.serialize_entry("errors", &self.errors)?;
-        map.end()
-    }
-}
-
-impl Serialize for TokenserverError {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        ErrorResponse::from(self).serialize(serializer)
-    }
-}
+// impl Serialize for TokenserverError {
+//     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+//     where
+//         S: Serializer,
+//     {
+//         ErrorResponse::from(self).serialize(serializer)
+//     }
+// }

@@ -1,4 +1,5 @@
 #![allow(clippy::type_complexity)]
+use std::marker::PhantomData;
 use std::task::{Context, Poll};
 
 use actix_web::{
@@ -11,8 +12,6 @@ use futures::future::{self, Either, Ready};
 use lazy_static::lazy_static;
 use regex::Regex;
 use syncstorage_common::Metrics;
-
-use crate::server::ServerState;
 
 lazy_static! {
     // e.g. "Firefox-iOS-Sync/18.0b1 (iPhone; iPhone OS 13.2.2) (Fennec (synctesting))"
@@ -34,11 +33,23 @@ $
 }
 
 #[allow(clippy::upper_case_acronyms)]
-#[derive(Debug, Default)]
-pub struct RejectUA;
+#[derive(Debug)]
+pub struct RejectUA<T> {
+    _server_state: PhantomData<T>,
+}
 
-impl<S, B> Transform<S> for RejectUA
+impl<T> Default for RejectUA<T> {
+    fn default() -> Self {
+        Self {
+            _server_state: PhantomData,
+        }
+    }
+}
+
+impl<T, S, B> Transform<S> for RejectUA<T>
 where
+    T: 'static,
+    for<'a> Metrics: From<&'a T>,
     S: Service<Request = ServiceRequest, Response = ServiceResponse<B>, Error = Error>,
     S::Future: 'static,
     B: 'static,
@@ -47,20 +58,26 @@ where
     type Response = ServiceResponse<B>;
     type Error = Error;
     type InitError = ();
-    type Transform = RejectUAMiddleware<S>;
+    type Transform = RejectUAMiddleware<S, T>;
     type Future = Ready<Result<Self::Transform, Self::InitError>>;
 
     fn new_transform(&self, service: S) -> Self::Future {
-        future::ok(RejectUAMiddleware { service })
+        future::ok(RejectUAMiddleware::<S, T> {
+            service,
+            _server_state: PhantomData,
+        })
     }
 }
 #[allow(clippy::upper_case_acronyms)]
-pub struct RejectUAMiddleware<S> {
+pub struct RejectUAMiddleware<S, T> {
     service: S,
+    _server_state: PhantomData<T>,
 }
 
-impl<S, B> Service for RejectUAMiddleware<S>
+impl<T, S, B> Service for RejectUAMiddleware<S, T>
 where
+    T: 'static,
+    for<'a> Metrics: From<&'a T>,
     S: Service<Request = ServiceRequest, Response = ServiceResponse<B>, Error = Error>,
     S::Future: 'static,
     B: 'static,
@@ -77,9 +94,7 @@ where
     fn call(&mut self, sreq: ServiceRequest) -> Self::Future {
         match sreq.headers().get(USER_AGENT) {
             Some(header) if header.to_str().map_or(false, should_reject) => {
-                let data = sreq
-                    .app_data::<Data<ServerState>>()
-                    .expect("No app_data ServerState");
+                let data = sreq.app_data::<Data<T>>().expect("No app_data ServerState");
                 trace!("Rejecting User-Agent: {:?}", header);
                 Metrics::from(data.get_ref()).incr("error.rejectua");
 

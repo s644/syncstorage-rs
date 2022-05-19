@@ -8,24 +8,19 @@ use backtrace::Backtrace;
 use std::convert::From;
 use std::fmt;
 
-use actix_web::{
-    dev::{HttpResponseBuilder, ServiceResponse},
-    error::ResponseError,
-    http::StatusCode,
-    middleware::errhandlers::ErrorHandlerResponse,
-    HttpResponse, Result,
-};
+use actix_web::{error::ResponseError, http::StatusCode, HttpResponse, Result};
 
 use serde::{
     ser::{SerializeMap, SerializeSeq, Serializer},
     Serialize,
 };
 
+use syncserver_web_common::middleware::MetricError;
 use syncstorage_common::{from_error, impl_fmt_display};
 use syncstorage_db_common::error::DbError;
 use thiserror::Error;
 
-use crate::web::error::{HawkError, ValidationError};
+use crate::api::error::{HawkError, ValidationError};
 use std::error::Error;
 
 /// Legacy Sync 1.1 error codes, which Sync 1.5 also returns by replacing the descriptive JSON
@@ -96,35 +91,11 @@ impl ApiErrorKind {
 }
 
 impl ApiError {
-    pub fn is_reportable(&self) -> bool {
-        // Should we report this error to sentry?
-        self.status.is_server_error()
-            && match &self.kind {
-                ApiErrorKind::Db(dbe) => dbe.is_reportable(),
-                _ => self.kind.metric_label().is_none(),
-            }
-    }
-
     fn weave_error_code(&self) -> WeaveError {
         match &self.kind {
             ApiErrorKind::Validation(ver) => ver.weave_error_code(),
             ApiErrorKind::Db(dber) if dber.is_quota() => WeaveError::OverQuota,
             _ => WeaveError::UnknownError,
-        }
-    }
-
-    pub fn render_404<B>(res: ServiceResponse<B>) -> Result<ErrorHandlerResponse<B>> {
-        if res.request().path().starts_with("/1.0/") {
-            // Do not use a custom response for Tokenserver requests.
-            Ok(ErrorHandlerResponse::Response(res))
-        } else {
-            // Replace the outbound error message with our own for Sync requests.
-            let resp = HttpResponseBuilder::new(StatusCode::NOT_FOUND)
-                .json(WeaveError::UnknownError as u32);
-            Ok(ErrorHandlerResponse::Response(ServiceResponse::new(
-                res.request().clone(),
-                resp.into_body(),
-            )))
         }
     }
 
@@ -142,10 +113,6 @@ impl ApiError {
 
     pub fn is_bso_not_found(&self) -> bool {
         matches!(&self.kind, ApiErrorKind::Db(dbe) if dbe.is_bso_not_found())
-    }
-
-    pub fn metric_label(&self) -> Option<String> {
-        self.kind.metric_label()
     }
 }
 
@@ -205,6 +172,25 @@ impl ResponseError for ApiError {
             resp.header("Retry-After", RETRY_AFTER.to_string());
         };
         resp.json(self.weave_error_code() as i32)
+    }
+}
+
+impl MetricError for ApiError {
+    fn is_reportable(&self) -> bool {
+        // Should we report this error to sentry?
+        self.status.is_server_error()
+            && match &self.kind {
+                ApiErrorKind::Db(dbe) => dbe.is_reportable(),
+                _ => self.kind.metric_label().is_none(),
+            }
+    }
+
+    fn metric_label(&self) -> Option<String> {
+        self.kind.metric_label()
+    }
+
+    fn backtrace(&self) -> String {
+        format!("{:#?}", self.backtrace)
     }
 }
 

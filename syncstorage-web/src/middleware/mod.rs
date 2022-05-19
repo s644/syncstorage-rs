@@ -1,5 +1,3 @@
-pub mod rejectua;
-pub mod sentry;
 pub mod weave;
 
 // # Web Middleware
@@ -9,18 +7,40 @@ pub mod weave;
 use std::{future::Future, sync::Arc};
 
 use actix_web::{
-    dev::{Service, ServiceRequest, ServiceResponse},
+    dev::{HttpResponseBuilder, Service, ServiceRequest, ServiceResponse},
+    http::StatusCode,
+    middleware::errhandlers::ErrorHandlerResponse,
     web::Data,
     Error, HttpRequest,
 };
 use syncserver_settings::Secrets;
+use syncserver_web_common::middleware::{rejectua, sentry};
 use syncstorage_common::{Metrics, Tags};
 use syncstorage_db_common::util::SyncTimestamp;
 use tokenserver_auth::TokenserverOrigin;
 
-use crate::error::{ApiError, ApiErrorKind};
-use crate::server::ServerState;
-use crate::web::{extractors::HawkIdentifier, DOCKER_FLOW_ENDPOINTS};
+use crate::api::{extractors::HawkIdentifier, DOCKER_FLOW_ENDPOINTS};
+use crate::error::{ApiError, ApiErrorKind, WeaveError};
+use crate::ServerState;
+
+pub use weave::WeaveTimestamp;
+pub type RejectUA = rejectua::RejectUA<ServerState>;
+pub type SentryWrapper = sentry::SentryWrapper<ServerState, ApiError>;
+
+pub fn render_404<B>(res: ServiceResponse<B>) -> actix_web::Result<ErrorHandlerResponse<B>> {
+    if res.request().path().starts_with("/1.0/") {
+        // Do not use a custom response for Tokenserver requests.
+        Ok(ErrorHandlerResponse::Response(res))
+    } else {
+        // Replace the outbound error message with our own for Sync requests.
+        let resp =
+            HttpResponseBuilder::new(StatusCode::NOT_FOUND).json(WeaveError::UnknownError as u32);
+        Ok(ErrorHandlerResponse::Response(ServiceResponse::new(
+            res.request().clone(),
+            resp.into_body(),
+        )))
+    }
+}
 
 /// The resource in question's Timestamp
 pub struct ResourceTimestamp(SyncTimestamp);
@@ -81,7 +101,7 @@ pub fn emit_http_status_with_tokenserver_origin(
         let metrics = {
             let statsd_client = req
                 .app_data::<Data<ServerState>>()
-                .map(|state| state.metrics.clone())
+                .map(|state| state.statsd_client.clone())
                 .ok_or_else(|| ApiError::from(ApiErrorKind::NoServerState))?;
 
             Metrics::from(&*statsd_client)

@@ -36,7 +36,7 @@ pub async fn get_tokenserver_result(
     req: TokenserverRequest,
     DbWrapper(db): DbWrapper,
     TokenserverMetrics(mut metrics): TokenserverMetrics,
-) -> Result<HttpResponse, Error> {
+) -> Result<HttpResponse, ApiError> {
     let updates = update_user(&req, db).await?;
 
     let (token, derived_secret) = {
@@ -183,36 +183,5 @@ async fn update_user(req: &TokenserverRequest, db: Box<dyn Db>) -> Result<UserUp
             keys_changed_at,
             uid: req.user.uid,
         })
-    }
-}
-
-pub async fn heartbeat(DbWrapper(db): DbWrapper) -> Result<HttpResponse, Error> {
-    let mut checklist = HashMap::new();
-    checklist.insert(
-        "version".to_owned(),
-        Value::String(env!("CARGO_PKG_VERSION").to_owned()),
-    );
-
-    match db.check().await {
-        Ok(result) => {
-            if result {
-                checklist.insert("database".to_owned(), Value::from("Ok"));
-            } else {
-                checklist.insert("database".to_owned(), Value::from("Err"));
-                checklist.insert(
-                    "database_msg".to_owned(),
-                    Value::from("check failed without error"),
-                );
-            };
-            let status = if result { "Ok" } else { "Err" };
-            checklist.insert("status".to_owned(), Value::from(status));
-            Ok(HttpResponse::Ok().json(checklist))
-        }
-        Err(e) => {
-            error!("Heartbeat error: {:?}", e);
-            checklist.insert("status".to_owned(), Value::from("Err"));
-            checklist.insert("database".to_owned(), Value::from("Unknown"));
-            Ok(HttpResponse::ServiceUnavailable().json(checklist))
-        }
     }
 }
