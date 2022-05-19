@@ -1,3 +1,12 @@
+#[macro_use]
+extern crate slog_scope;
+
+mod metrics;
+mod tags;
+
+pub use metrics::{metrics_from_opts, Metrics};
+pub use tags::Tags;
+
 use hkdf::Hkdf;
 use sha2::Sha256;
 

@@ -9,17 +9,15 @@ use actix_web::web::Data;
 use actix_web::{FromRequest, HttpRequest, HttpResponse};
 use futures::future::LocalBoxFuture;
 use futures::FutureExt;
-use syncserver_common::X_LAST_MODIFIED;
+use syncserver_common::{Metrics, Tags, X_LAST_MODIFIED};
 use syncserver_db_common::{params, Db, DbPool, UserIdentifier};
 
 use crate::db::results::ConnectionInfo;
 use crate::error::{ApiError, ApiErrorKind};
-use crate::server::metrics::Metrics;
 use crate::server::ServerState;
 use crate::web::extractors::{
     BsoParam, CollectionParam, HawkIdentifier, PreConditionHeader, PreConditionHeaderOpt,
 };
-use crate::web::tags::Tags;
 
 #[derive(Clone)]
 pub struct DbTransactionPool {
@@ -42,7 +40,11 @@ fn set_extra(exts: &mut RefMut<'_, Extensions>, connection_info: ConnectionInfo)
         "spanner_connection_idle",
         &connection_info.spanner_idle.to_string(),
     );
-    tags.commit(exts);
+
+    match exts.get_mut::<Tags>() {
+        Some(t) => t.extend(tags),
+        None => exts.insert(tags),
+    }
 }
 
 impl DbTransactionPool {
