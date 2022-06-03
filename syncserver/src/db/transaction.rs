@@ -21,7 +21,7 @@ use crate::web::extractors::{
 
 #[derive(Clone)]
 pub struct DbTransactionPool {
-    pool: Box<dyn DbPool>,
+    pool: Box<dyn DbPool<Error = Box<dyn std::error::Error>>>,
     is_read: bool,
     user_id: UserIdentifier,
     collection: Option<String>,
@@ -56,9 +56,9 @@ impl DbTransactionPool {
         &'a self,
         request: HttpRequest,
         action: A,
-    ) -> Result<(R, Box<dyn Db<'a>>), ApiError>
+    ) -> Result<(R, Box<dyn Db<'a, Error = Box<dyn std::error::Error>>>), ApiError>
     where
-        A: FnOnce(Box<dyn Db<'a>>) -> F,
+        A: FnOnce(Box<dyn Db<'a, Error = Box<dyn std::error::Error>>>) -> F,
         F: Future<Output = Result<R, ApiError>> + 'a,
     {
         // Get connection from pool
@@ -93,7 +93,7 @@ impl DbTransactionPool {
         }
     }
 
-    pub fn get_pool(&self) -> Result<Box<dyn DbPool>, Error> {
+    pub fn get_pool(&self) -> Result<Box<dyn DbPool<Error = Box<dyn std::error::Error>>>, Error> {
         Ok(self.pool.clone())
     }
 
@@ -104,7 +104,7 @@ impl DbTransactionPool {
         action: A,
     ) -> Result<R, ApiError>
     where
-        A: FnOnce(Box<dyn Db<'a>>) -> F,
+        A: FnOnce(Box<dyn Db<'a, Error = Box<dyn std::error::Error>>>) -> F,
         F: Future<Output = Result<R, ApiError>> + 'a,
     {
         let (resp, db) = self.transaction_internal(request, action).await?;
@@ -122,7 +122,7 @@ impl DbTransactionPool {
         action: A,
     ) -> Result<HttpResponse, ApiError>
     where
-        A: FnOnce(Box<dyn Db<'a>>) -> F,
+        A: FnOnce(Box<dyn Db<'a, Error = Box<dyn std::error::Error>>>) -> F,
         F: Future<Output = Result<HttpResponse, ApiError>> + 'a,
     {
         let mreq = request.clone();
