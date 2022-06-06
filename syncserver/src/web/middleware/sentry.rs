@@ -13,6 +13,7 @@ use sentry_backtrace::parse_stacktrace;
 use syncserver_common::{Metrics, ReportableError, Tags};
 use tokenserver_common::error::TokenserverError;
 
+use crate::db::DbPool;
 use crate::error::ApiError;
 use crate::server::ServerState;
 use crate::web::tags::TagsWrapper;
@@ -83,7 +84,7 @@ where
         let TagsWrapper(mut tags) = TagsWrapper::from(sreq.head());
         sreq.extensions_mut().insert(tags.clone());
         let metrics = sreq
-            .app_data::<Data<ServerState>>()
+            .app_data::<Data<ServerState<DbPool>>>()
             .map(|state| Metrics::from(state.get_ref()));
 
         let fut = self.service.call(sreq);
