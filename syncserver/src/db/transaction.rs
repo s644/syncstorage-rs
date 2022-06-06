@@ -10,9 +10,9 @@ use actix_web::{FromRequest, HttpRequest, HttpResponse};
 use futures::future::LocalBoxFuture;
 use futures::FutureExt;
 use syncserver_common::{Metrics, Tags, X_LAST_MODIFIED};
-use syncserver_db_common::{params, Db, DbPool, UserIdentifier};
+use syncserver_db_common::{params, Db as DbTrait, DbPool as DbPoolTrait, UserIdentifier};
 
-use crate::db::results::ConnectionInfo;
+use crate::db::{results::ConnectionInfo, Db, DbPool};
 use crate::error::{ApiError, ApiErrorKind};
 use crate::server::ServerState;
 use crate::web::extractors::{
@@ -21,7 +21,7 @@ use crate::web::extractors::{
 
 #[derive(Clone)]
 pub struct DbTransactionPool {
-    pool: Box<dyn DbPool<Error = Box<dyn std::error::Error>>>,
+    pool: DbPool,
     is_read: bool,
     user_id: UserIdentifier,
     collection: Option<String>,
@@ -56,9 +56,9 @@ impl DbTransactionPool {
         &'a self,
         request: HttpRequest,
         action: A,
-    ) -> Result<(R, Box<dyn Db<'a, Error = Box<dyn std::error::Error>>>), ApiError>
+    ) -> Result<(R, Db), ApiError>
     where
-        A: FnOnce(Box<dyn Db<'a, Error = Box<dyn std::error::Error>>>) -> F,
+        A: FnOnce(Db) -> F,
         F: Future<Output = Result<R, ApiError>> + 'a,
     {
         // Get connection from pool
@@ -93,7 +93,7 @@ impl DbTransactionPool {
         }
     }
 
-    pub fn get_pool(&self) -> Result<Box<dyn DbPool<Error = Box<dyn std::error::Error>>>, Error> {
+    pub fn get_pool(&self) -> Result<DbPool, Error> {
         Ok(self.pool.clone())
     }
 
@@ -104,7 +104,7 @@ impl DbTransactionPool {
         action: A,
     ) -> Result<R, ApiError>
     where
-        A: FnOnce(Box<dyn Db<'a, Error = Box<dyn std::error::Error>>>) -> F,
+        A: FnOnce(Db) -> F,
         F: Future<Output = Result<R, ApiError>> + 'a,
     {
         let (resp, db) = self.transaction_internal(request, action).await?;
@@ -122,11 +122,11 @@ impl DbTransactionPool {
         action: A,
     ) -> Result<HttpResponse, ApiError>
     where
-        A: FnOnce(Box<dyn Db<'a, Error = Box<dyn std::error::Error>>>) -> F,
+        A: FnOnce(Db) -> F,
         F: Future<Output = Result<HttpResponse, ApiError>> + 'a,
     {
         let mreq = request.clone();
-        let check_precondition = move |db: Box<dyn Db<'a>>| {
+        let check_precondition = move |db: Db| {
             async move {
                 // set the extra information for all requests so we capture default err handlers.
                 set_extra(&mut mreq.extensions_mut(), db.get_connection_info());
