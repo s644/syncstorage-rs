@@ -562,7 +562,7 @@ pub async fn heartbeat(hb: HeartbeatRequest, req: HttpRequest) -> Result<HttpRes
             .db_pool
             .get()
             .await
-            .map_err(ApiError::from)?;
+            .map_err(|_| ApiErrorKind::Internal("Failed to get Tokenserver pool".to_owned()))?;
         let mut tokenserver_checklist = Map::new();
 
         match db.check().await {
