@@ -10,7 +10,7 @@ use protobuf::{
 };
 use syncserver_common::Tags;
 use syncserver_db_common::{
-    error::{DbError, DbErrorKind},
+    error::{CommonDbError, CommonDbErrorKind},
     params, results,
     util::to_rfc3339,
     UserIdentifier, BATCH_LIFETIME, DEFAULT_BSO_TTL,
@@ -100,7 +100,7 @@ pub async fn append_async(db: &SpannerDb, params: params::AppendToBatch) -> DbRe
     if !exists {
         // NOTE: db tests expects this but it doesn't seem necessary w/ the
         // handler validating the batch before appends
-        return Err(DbErrorKind::BatchNotFound.into());
+        return Err(CommonDbErrorKind::BatchNotFound.into());
     }
 
     do_append_async(
@@ -571,8 +571,8 @@ async fn pretouch_collection_async(
     Ok(())
 }
 
-pub fn validate_batch_id(id: &str) -> Result<(), DbError> {
+pub fn validate_batch_id(id: &str) -> Result<(), CommonDbError> {
     Uuid::from_str(id)
         .map(|_| ())
-        .map_err(|e| DbError::internal(&format!("Invalid batch_id: {}", e)))
+        .map_err(|e| CommonDbError::internal(&format!("Invalid batch_id: {}", e)))
 }
