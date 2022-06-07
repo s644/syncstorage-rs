@@ -3070,6 +3070,7 @@ dependencies = [
  "chrono",
  "deadpool",
  "diesel",
+ "diesel_migrations",
  "futures 0.3.19",
  "http",
  "lazy_static",
@@ -3332,7 +3333,6 @@ dependencies = [
  "serde_json",
  "syncserver-common",
  "syncserver-db-common",
- "syncstorage-mysql",
  "thiserror",
 ]
 
@@ -3341,6 +3341,7 @@ name = "tokenserver-mysql"
 version = "0.10.2"
 dependencies = [
  "async-trait",
+ "backtrace",
  "diesel",
  "diesel_logger",
  "diesel_migrations",
@@ -3354,7 +3355,8 @@ dependencies = [
  "syncserver-common",
  "syncserver-db-common",
  "syncserver-settings",
- "syncstorage-mysql",
+ "thiserror",
+ "tokenserver-common",
  "tokenserver-settings",
  "tokio",
 ]
