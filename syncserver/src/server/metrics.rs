@@ -41,12 +41,11 @@ pub fn metrics_from_request(req: &HttpRequest, client: Option<Box<StatsdClient>>
     }
 }
 
-// TODO: rename from <E> to <T>
-impl<E> From<&ServerState<E>> for Metrics
+impl<T> From<&ServerState<T>> for Metrics
 where
-    E: DbPoolTrait,
+    T: DbPoolTrait,
 {
-    fn from(state: &ServerState<E>) -> Self {
+    fn from(state: &ServerState<T>) -> Self {
         Metrics {
             client: Some(*state.metrics.clone()),
             tags: None,
