@@ -31,11 +31,11 @@ use syncserver_common::{Metrics, Tags, X_WEAVE_RECORDS};
 use syncserver_db_common::{
     params::{self, PostCollectionBso},
     util::SyncTimestamp,
-    DbPool as DbPoolTrait, Sorting, UserIdentifier,
+    Sorting, UserIdentifier,
 };
 use validator::{Validate, ValidationError};
 
-use crate::db::{transaction::DbTransactionPool, DbError};
+use crate::db::{transaction::DbTransactionPool, BoxDbPool};
 use crate::error::{ApiError, ApiErrorKind};
 use crate::label;
 use crate::server::{metrics::MetricsWrapper, ServerState, BSO_ID_REGEX, COLLECTION_ID_REGEX};
@@ -936,7 +936,7 @@ pub struct QuotaInfo {
 #[derive(Clone, Debug)]
 pub struct HeartbeatRequest {
     pub headers: HeaderMap,
-    pub db_pool: Box<dyn DbPoolTrait<Error = DbError>>,
+    pub db_pool: BoxDbPool,
     pub quota: QuotaInfo,
 }
 
