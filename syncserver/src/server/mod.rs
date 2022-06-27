@@ -12,12 +12,11 @@ use actix_web::{
 };
 use cadence::StatsdClient;
 use syncserver_common::Metrics;
-use syncserver_db_common::DbPool as DbPoolTrait;
 use syncserver_settings::Settings;
 use syncstorage_settings::{Deadman, ServerLimits};
 use tokio::sync::RwLock;
 
-use crate::db::{spawn_pool_periodic_reporter, DbError, DbPool};
+use crate::db::{spawn_pool_periodic_reporter, BoxDbPool, DbPool};
 use crate::error::{ApiError, ApiErrorKind};
 use crate::tokenserver;
 use crate::web::{handlers, middleware};
@@ -37,7 +36,7 @@ pub mod user_agent;
 /// This is the global HTTP state object that will be made available to all
 /// HTTP API calls.
 pub struct ServerState {
-    pub db_pool: Box<dyn DbPoolTrait<Error = DbError>>,
+    pub db_pool: BoxDbPool,
 
     /// Server-enforced limits for request payloads.
     pub limits: Arc<ServerLimits>,
