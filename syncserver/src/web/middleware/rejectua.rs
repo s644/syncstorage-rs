@@ -12,7 +12,6 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use syncserver_common::Metrics;
 
-use crate::db::DbPool;
 use crate::server::ServerState;
 
 lazy_static! {
@@ -79,7 +78,7 @@ where
         match sreq.headers().get(USER_AGENT) {
             Some(header) if header.to_str().map_or(false, should_reject) => {
                 let data = sreq
-                    .app_data::<Data<ServerState<DbPool>>>()
+                    .app_data::<Data<ServerState>>()
                     .expect("No app_data ServerState");
                 trace!("Rejecting User-Agent: {:?}", header);
                 Metrics::from(data.get_ref()).incr("error.rejectua");

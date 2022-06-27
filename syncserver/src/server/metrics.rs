@@ -3,10 +3,8 @@ use cadence::StatsdClient;
 use futures::future;
 use futures::future::Ready;
 use syncserver_common::{Metrics, Tags};
-use syncserver_db_common::DbPool as DbPoolTrait;
 
 use super::ServerState;
-use crate::db::DbPool;
 use crate::web::tags::TagsWrapper;
 
 pub struct MetricsWrapper(pub Metrics);
@@ -19,7 +17,7 @@ impl FromRequest for MetricsWrapper {
     fn from_request(req: &HttpRequest, _: &mut Payload) -> Self::Future {
         future::ok(Self(metrics_from_request(
             req,
-            req.app_data::<Data<ServerState<DbPool>>>()
+            req.app_data::<Data<ServerState>>()
                 .map(|state| state.metrics.clone()),
         )))
     }
@@ -41,11 +39,8 @@ pub fn metrics_from_request(req: &HttpRequest, client: Option<Box<StatsdClient>>
     }
 }
 
-impl<T> From<&ServerState<T>> for Metrics
-where
-    T: DbPoolTrait,
-{
-    fn from(state: &ServerState<T>) -> Self {
+impl From<&ServerState> for Metrics {
+    fn from(state: &ServerState) -> Self {
         Metrics {
             client: Some(*state.metrics.clone()),
             tags: None,

@@ -35,7 +35,7 @@ use syncserver_db_common::{
 };
 use validator::{Validate, ValidationError};
 
-use crate::db::{transaction::DbTransactionPool, DbPool};
+use crate::db::{transaction::DbTransactionPool, DbError};
 use crate::error::{ApiError, ApiErrorKind};
 use crate::label;
 use crate::server::{metrics::MetricsWrapper, ServerState, BSO_ID_REGEX, COLLECTION_ID_REGEX};
@@ -237,7 +237,7 @@ impl FromRequest for BsoBodies {
         let newlines: bool = content_type == "application/newlines";
 
         // Grab the max sizes
-        let state = match req.app_data::<Data<ServerState<DbPool>>>() {
+        let state = match req.app_data::<Data<ServerState>>() {
             Some(s) => s,
             None => {
                 error!("⚠️ Could not load the app state");
@@ -407,7 +407,7 @@ impl FromRequest for BsoBody {
                 )
                 .into());
             }
-            let state = match req.app_data::<Data<ServerState<DbPool>>>() {
+            let state = match req.app_data::<Data<ServerState>>() {
                 Some(s) => s,
                 None => {
                     error!("⚠️ Could not load the app state");
@@ -755,7 +755,7 @@ impl FromRequest for CollectionPostRequest {
         let req = req.clone();
         let mut payload = payload.take();
         Box::pin(async move {
-            let state = match req.app_data::<Data<ServerState<DbPool>>>() {
+            let state = match req.app_data::<Data<ServerState>>() {
                 Some(s) => s,
                 None => {
                     error!("⚠️ Could not load the app state");
@@ -936,7 +936,7 @@ pub struct QuotaInfo {
 #[derive(Clone, Debug)]
 pub struct HeartbeatRequest {
     pub headers: HeaderMap,
-    pub db_pool: DbPool,
+    pub db_pool: Box<dyn DbPoolTrait<Error = DbError>>,
     pub quota: QuotaInfo,
 }
 
@@ -950,7 +950,7 @@ impl FromRequest for HeartbeatRequest {
 
         async move {
             let headers = req.headers().clone();
-            let state = match req.app_data::<Data<ServerState<DbPool>>>() {
+            let state = match req.app_data::<Data<ServerState>>() {
                 Some(s) => s,
                 None => {
                     error!("⚠️ Could not load the app state");
@@ -1366,7 +1366,7 @@ impl FromRequest for BatchRequestOpt {
                 })
                 .await?
                 .into_inner();
-            let state = match req.app_data::<Data<ServerState<DbPool>>>() {
+            let state = match req.app_data::<Data<ServerState>>() {
                 Some(s) => s,
                 None => {
                     error!("⚠️ Could not load the app state");
@@ -1786,11 +1786,11 @@ mod tests {
         MockDb::new()
     }
 
-    fn make_state() -> ServerState<MockDbPool> {
+    fn make_state() -> ServerState {
         let syncserver_settings = GlobalSettings::default();
         let syncstorage_settings = SyncstorageSettings::default();
         ServerState {
-            db_pool: MockDbPool::new(),
+            db_pool: Box::new(MockDbPool::new()),
             limits: Arc::clone(&SERVER_LIMITS),
             limits_json: serde_json::to_string(&**SERVER_LIMITS).unwrap(),
             port: 8000,
