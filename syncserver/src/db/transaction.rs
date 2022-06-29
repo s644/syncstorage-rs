@@ -47,7 +47,6 @@ fn set_extra(exts: &mut RefMut<'_, Extensions>, connection_info: ConnectionInfo)
     }
 }
 
-// could re-export versions of traits with Error filled in?
 impl DbTransactionPool {
     /// Perform an action inside of a DB transaction. If the action fails, the
     /// transaction is rolled back. If the action succeeds, the transaction is
