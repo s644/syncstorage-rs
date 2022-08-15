@@ -9,7 +9,7 @@ use crate::tokenserver::settings::Settings;
 use std::{convert::TryFrom, time::Duration};
 
 /// The information extracted from a valid BrowserID assertion.
-#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
 pub struct VerifyOutput {
     pub device_id: Option<String>,
     pub email: String,

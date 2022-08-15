@@ -1,13 +1,13 @@
 #![allow(clippy::type_complexity)]
-use std::task::{Context, Poll};
+use std::future::Future;
 
 use actix_web::{
-    dev::{Service, ServiceRequest, ServiceResponse, Transform},
+    dev::{Service, ServiceRequest, ServiceResponse},
     http::header::USER_AGENT,
     web::Data,
-    Error, HttpResponse,
+    HttpResponse,
 };
-use futures::future::{self, Either, Ready};
+use futures::future::{self, Either};
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -36,62 +36,31 @@ $
 #[derive(Debug, Default)]
 pub struct RejectUA;
 
-impl<S, B> Transform<S> for RejectUA
-where
-    S: Service<Request = ServiceRequest, Response = ServiceResponse<B>, Error = Error>,
-    S::Future: 'static,
-    B: 'static,
-{
-    type Request = ServiceRequest;
-    type Response = ServiceResponse<B>;
-    type Error = Error;
-    type InitError = ();
-    type Transform = RejectUAMiddleware<S>;
-    type Future = Ready<Result<Self::Transform, Self::InitError>>;
+pub fn reject_user_agent(
+    request: ServiceRequest,
+    service: &mut impl Service<
+        Request = ServiceRequest,
+        Response = ServiceResponse,
+        Error = actix_web::Error,
+    >,
+) -> impl Future<Output = Result<ServiceResponse, actix_web::Error>> {
+    match request.headers().get(USER_AGENT) {
+        Some(header) if header.to_str().map_or(false, should_reject) => {
+            let data = request
+                .app_data::<Data<ServerState>>()
+                .expect("No app_data ServerState");
+            trace!("Rejecting User-Agent: {:?}", header);
+            Metrics::from(data.get_ref()).incr("error.rejectua");
 
-    fn new_transform(&self, service: S) -> Self::Future {
-        future::ok(RejectUAMiddleware { service })
-    }
-}
-#[allow(clippy::upper_case_acronyms)]
-pub struct RejectUAMiddleware<S> {
-    service: S,
-}
-
-impl<S, B> Service for RejectUAMiddleware<S>
-where
-    S: Service<Request = ServiceRequest, Response = ServiceResponse<B>, Error = Error>,
-    S::Future: 'static,
-    B: 'static,
-{
-    type Request = ServiceRequest;
-    type Response = ServiceResponse<B>;
-    type Error = Error;
-    type Future = Either<Ready<Result<Self::Response, Self::Error>>, S::Future>;
-
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.service.poll_ready(cx)
-    }
-
-    fn call(&mut self, sreq: ServiceRequest) -> Self::Future {
-        match sreq.headers().get(USER_AGENT) {
-            Some(header) if header.to_str().map_or(false, should_reject) => {
-                let data = sreq
-                    .app_data::<Data<ServerState>>()
-                    .expect("No app_data ServerState");
-                trace!("Rejecting User-Agent: {:?}", header);
-                Metrics::from(data.get_ref()).incr("error.rejectua");
-
-                Either::Left(future::ok(
-                    sreq.into_response(
-                        HttpResponse::ServiceUnavailable()
-                            .body("0".to_owned())
-                            .into_body(),
-                    ),
-                ))
-            }
-            _ => Either::Right(self.service.call(sreq)),
+            Either::Left(future::ok(
+                request.into_response(
+                    HttpResponse::ServiceUnavailable()
+                        .body("0".to_owned())
+                        .into_body(),
+                ),
+            ))
         }
+        _ => Either::Right(service.call(request)),
     }
 }
 
