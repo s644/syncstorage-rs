@@ -22,7 +22,7 @@ use serde::{
 };
 
 use syncserver_common::{from_error, impl_fmt_display, ReportableError};
-use syncserver_db_common::error::DbErrorIntrospect;
+use syncstorage_db_common::error::DbErrorIntrospect;
 
 #[cfg(feature = "mysql")]
 use syncstorage_mysql::error::DbError;
