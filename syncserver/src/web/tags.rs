@@ -11,6 +11,7 @@ use syncserver_common::Tags;
 
 use crate::server::user_agent::parse_user_agent;
 
+/// A local "newtype" that wraps `Tags` so we can implement `FromRequest`.
 pub struct TagsWrapper(pub Tags);
 
 impl From<&RequestHead> for TagsWrapper {
