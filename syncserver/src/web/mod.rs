@@ -5,6 +5,7 @@ pub mod extractors;
 pub mod handlers;
 pub mod middleware;
 pub mod tags;
+mod transaction;
 
 // Known DockerFlow commands for Ops callbacks
 pub const DOCKER_FLOW_ENDPOINTS: [&str; 4] = [

@@ -7,6 +7,7 @@ use syncserver_common::{Metrics, Tags};
 use super::ServerState;
 use crate::web::tags::TagsWrapper;
 
+/// A local "newtype" that wraps `Metrics` so we can implement `FromRequest`.
 pub struct MetricsWrapper(pub Metrics);
 
 impl FromRequest for MetricsWrapper {

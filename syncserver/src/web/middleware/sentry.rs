@@ -11,7 +11,7 @@ use futures::future::{self, LocalBoxFuture};
 use sentry::protocol::Event;
 use sentry_backtrace::parse_stacktrace;
 use syncserver_common::{Metrics, ReportableError, Tags};
-use tokenserver_common::error::TokenserverError;
+use tokenserver_common::TokenserverError;
 
 use crate::error::ApiError;
 use crate::server::ServerState;
