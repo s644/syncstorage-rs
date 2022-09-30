@@ -89,7 +89,7 @@ impl TokenserverPool {
     #[cfg(test)]
     pub async fn get_tokenserver_db(&self) -> Result<TokenserverDb, DbError> {
         let pool = self.clone();
-        let conn = syncserver_db_common::run_on_blocking_threadpool(
+        let conn = syncserver_common::run_on_blocking_threadpool(
             move || pool.inner.get().map_err(DbError::from),
             DbError::internal,
         )
@@ -111,7 +111,7 @@ impl DbPoolTrait for TokenserverPool {
         metrics.start_timer("storage.get_pool", None);
 
         let pool = self.clone();
-        let conn = syncserver_db_common::run_on_blocking_threadpool(
+        let conn = syncserver_common::run_on_blocking_threadpool(
             move || pool.inner.get().map_err(DbError::from),
             DbError::internal,
         )

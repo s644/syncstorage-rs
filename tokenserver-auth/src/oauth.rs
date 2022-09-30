@@ -1,4 +1,3 @@
-use actix_web::{error::BlockingError, web};
 use async_trait::async_trait;
 use pyo3::{
     prelude::{Py, PyAny, PyErr, PyModule, Python},
@@ -39,7 +38,7 @@ impl Verifier {
 impl TryFrom<&Settings> for Verifier {
     type Error = TokenserverError;
 
-    fn try_from(settings: &Settings) -> Result<Self, TokenserverError> {
+    fn try_from(settings: &Settings) -> Result<Self, Self::Error> {
         let inner: Py<PyAny> = Python::with_gil::<_, Result<Py<PyAny>, PyErr>>(|py| {
             let code = include_str!("verify.py");
             let module = PyModule::from_code(py, code, Self::FILENAME, Self::FILENAME)?;
@@ -151,10 +150,16 @@ impl VerifyToken for Verifier {
         // improve performance, we make the request on a thread in a threadpool specifically
         // used for blocking operations. The JWK should _always_ be cached in production to
         // maximize performance.
-        let fut = web::block(move || verify_inner(&verifier));
+        let fut = syncserver_common::run_on_blocking_threadpool(
+            move || verify_inner(&verifier),
+            |msg| TokenserverError {
+                context: msg,
+                ..TokenserverError::internal_error()
+            },
+        );
 
         // The PyFxA OAuth client does not offer a way to set a request timeout, so we set one here
-        // by timing out the future if the verification process blocks its thread for longer
+        // by timing out the future if the verification process blocks this thread for longer
         // than the specified number of seconds.
         time::timeout(Duration::from_secs(self.timeout), fut)
             .await
@@ -162,12 +167,5 @@ impl VerifyToken for Verifier {
                 context: "OAuth verification timeout".to_owned(),
                 ..TokenserverError::resource_unavailable()
             })?
-            .map_err(|e| match e {
-                BlockingError::Error(inner) => inner,
-                BlockingError::Canceled => TokenserverError {
-                    context: "Tokenserver threadpool operation failed".to_owned(),
-                    ..TokenserverError::internal_error()
-                },
-            })
     }
 }

@@ -4,6 +4,7 @@ version = "0.12.4"
 edition = "2021"
 
 [dependencies]
+actix-web = "3"
 cadence = "0.26"
 hkdf = "0.11"
 sha2 = "0.9"

@@ -667,7 +667,7 @@ macro_rules! sync_db_method {
     ($name:ident, $sync_name:ident, $type:ident, $result:ty) => {
         fn $name(&self, params: params::$type) -> DbFuture<'_, $result> {
             let db = self.clone();
-            Box::pin(syncserver_db_common::run_on_blocking_threadpool(
+            Box::pin(syncserver_common::run_on_blocking_threadpool(
                 move || db.$sync_name(params),
                 DbError::internal,
             ))
@@ -693,7 +693,7 @@ impl DbTrait for TokenserverDb {
 
     fn check(&self) -> DbFuture<'_, results::Check> {
         let db = self.clone();
-        Box::pin(syncserver_db_common::run_on_blocking_threadpool(
+        Box::pin(syncserver_common::run_on_blocking_threadpool(
             move || db.check_sync(),
             DbError::internal,
         ))

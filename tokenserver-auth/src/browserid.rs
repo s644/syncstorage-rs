@@ -288,7 +288,7 @@ mod tests {
     use mockito::{self, Mock};
     use serde_json::json;
 
-    #[actix_rt::test]
+    #[tokio::test]
     async fn test_browserid_verifier_success() {
         let body = json!({
             "status": "okay",
@@ -326,7 +326,7 @@ mod tests {
         assert_eq!(expected_result, result);
     }
 
-    #[actix_rt::test]
+    #[tokio::test]
     async fn test_browserid_verifier_failure_cases() {
         const AUDIENCE: &str = "https://test.com";
 
@@ -446,7 +446,7 @@ mod tests {
         }
     }
 
-    #[actix_rt::test]
+    #[tokio::test]
     async fn test_browserid_verifier_rejects_unissuers() {
         const AUDIENCE: &str = "https://test.com";
         const ISSUER: &str = "accounts.firefox.com";

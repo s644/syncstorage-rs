@@ -39,7 +39,7 @@ pub async fn create_spanner_session(
     emulator_host: Option<String>,
 ) -> Result<SpannerSession, DbError> {
     let using_spanner_emulator = emulator_host.is_some();
-    let chan = syncserver_db_common::run_on_blocking_threadpool(
+    let chan = syncserver_common::run_on_blocking_threadpool(
         move || -> Result<grpcio::Channel, DbError> {
             if let Some(spanner_emulator_address) = emulator_host {
                 Ok(ChannelBuilder::new(env)

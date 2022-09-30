@@ -32,12 +32,12 @@ use syncstorage_db::{
     params::{self, PostCollectionBso},
     DbError, DbPoolTrait, Sorting, SyncTimestamp, UserIdentifier,
 };
+use tokenserver_auth::TokenserverOrigin;
 use validator::{Validate, ValidationError};
 
 use crate::error::{ApiError, ApiErrorKind};
 use crate::label;
 use crate::server::{metrics::MetricsWrapper, ServerState, BSO_ID_REGEX, COLLECTION_ID_REGEX};
-use crate::tokenserver::auth::TokenserverOrigin;
 use crate::web::{
     auth::HawkPayload,
     error::{HawkErrorKind, ValidationErrorKind},

@@ -4,6 +4,10 @@ extern crate slog_scope;
 mod metrics;
 mod tags;
 
+use std::fmt;
+
+use actix_web::{error::BlockingError, web};
+
 pub use metrics::{metrics_from_opts, Metrics};
 pub use tags::Tags;
 
@@ -58,4 +62,19 @@ pub trait ReportableError {
     fn error_backtrace(&self) -> String;
     fn is_sentry_event(&self) -> bool;
     fn metric_label(&self) -> Option<String>;
+}
+
+pub async fn run_on_blocking_threadpool<F, T, E, M>(f: F, e: M) -> Result<T, E>
+where
+    F: FnOnce() -> Result<T, E> + Send + 'static,
+    T: Send + 'static,
+    E: fmt::Debug + Send + 'static,
+    M: FnOnce(String) -> E,
+{
+    web::block(f)
+        .await
+        .map_err(|blocking_error| match blocking_error {
+            BlockingError::Error(inner) => inner,
+            BlockingError::Canceled => e("Blocking threadpool operation canceled".to_owned()),
+        })
 }

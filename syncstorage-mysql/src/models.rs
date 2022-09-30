@@ -983,7 +983,7 @@ impl DbTrait for MysqlDb {
 
     fn commit(&self) -> DbFuture<'_, (), Self::Error> {
         let db = self.clone();
-        Box::pin(syncserver_db_common::run_on_blocking_threadpool(
+        Box::pin(syncserver_common::run_on_blocking_threadpool(
             move || db.commit_sync(),
             Self::Error::internal,
         ))
@@ -991,7 +991,7 @@ impl DbTrait for MysqlDb {
 
     fn rollback(&self) -> DbFuture<'_, (), Self::Error> {
         let db = self.clone();
-        Box::pin(syncserver_db_common::run_on_blocking_threadpool(
+        Box::pin(syncserver_common::run_on_blocking_threadpool(
             move || db.rollback_sync(),
             Self::Error::internal,
         ))
@@ -1004,7 +1004,7 @@ impl DbTrait for MysqlDb {
 
     fn check(&self) -> DbFuture<'_, results::Check, Self::Error> {
         let db = self.clone();
-        Box::pin(syncserver_db_common::run_on_blocking_threadpool(
+        Box::pin(syncserver_common::run_on_blocking_threadpool(
             move || db.check_sync(),
             Self::Error::internal,
         ))
@@ -1067,7 +1067,7 @@ impl DbTrait for MysqlDb {
 
     fn get_collection_id(&self, name: String) -> DbFuture<'_, i32, Self::Error> {
         let db = self.clone();
-        Box::pin(syncserver_db_common::run_on_blocking_threadpool(
+        Box::pin(syncserver_common::run_on_blocking_threadpool(
             move || db.get_collection_id(&name),
             Self::Error::internal,
         ))
@@ -1079,7 +1079,7 @@ impl DbTrait for MysqlDb {
 
     fn create_collection(&self, name: String) -> DbFuture<'_, i32, Self::Error> {
         let db = self.clone();
-        Box::pin(syncserver_db_common::run_on_blocking_threadpool(
+        Box::pin(syncserver_common::run_on_blocking_threadpool(
             move || db.get_or_create_collection_id(&name),
             Self::Error::internal,
         ))
@@ -1090,7 +1090,7 @@ impl DbTrait for MysqlDb {
         param: params::UpdateCollection,
     ) -> DbFuture<'_, SyncTimestamp, Self::Error> {
         let db = self.clone();
-        Box::pin(syncserver_db_common::run_on_blocking_threadpool(
+        Box::pin(syncserver_common::run_on_blocking_threadpool(
             move || db.update_collection(param.user_id.legacy_id as u32, param.collection_id),
             Self::Error::internal,
         ))
@@ -1108,7 +1108,7 @@ impl DbTrait for MysqlDb {
 
     fn clear_coll_cache(&self) -> DbFuture<'_, (), Self::Error> {
         let db = self.clone();
-        Box::pin(syncserver_db_common::run_on_blocking_threadpool(
+        Box::pin(syncserver_common::run_on_blocking_threadpool(
             move || {
                 db.coll_cache.clear();
                 Ok(())

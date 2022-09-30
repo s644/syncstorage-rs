@@ -105,7 +105,7 @@ impl DbPoolTrait for MysqlDbPool {
 
     async fn get(&self) -> DbResult<Box<dyn DbTrait<Error = Self::Error>>> {
         let pool = self.clone();
-        syncserver_db_common::run_on_blocking_threadpool(
+        syncserver_common::run_on_blocking_threadpool(
             move || pool.get_sync(),
             Self::Error::internal,
         )

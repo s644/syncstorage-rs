@@ -1,4 +1,3 @@
-pub mod auth;
 pub mod extractors;
 pub mod handlers;
 pub mod logging;
@@ -10,6 +9,7 @@ use serde::{
     Serialize,
 };
 use syncserver_common::Metrics;
+use tokenserver_auth::{browserid, oauth, VerifyToken};
 use tokenserver_common::NodeType;
 use tokenserver_db::{params, DbPoolTrait, TokenserverPool};
 use tokenserver_settings::Settings;
@@ -18,7 +18,6 @@ use crate::{
     error::{ApiError, ApiErrorKind},
     server::user_agent,
 };
-use auth::{browserid, oauth, VerifyToken};
 
 use std::{collections::HashMap, convert::TryFrom, fmt};
 

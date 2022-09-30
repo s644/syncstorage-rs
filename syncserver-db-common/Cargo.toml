@@ -4,7 +4,6 @@ version = "0.12.4"
 edition = "2021"
 
 [dependencies]
-actix-web = "3"
 backtrace = "0.3.61"
 # Pin to 0.5 for now, to keep it under tokio 0.2 (issue977).
 # Fix for #803 (deadpool#92) points to our fork for now
