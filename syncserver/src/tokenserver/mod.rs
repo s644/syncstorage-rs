@@ -41,7 +41,7 @@ impl ServerState {
                 .expect("failed to create Tokenserver OAuth verifier"),
         );
         let browserid_verifier = Box::new(
-            browserid::RemoteVerifier::try_from(settings)
+            browserid::Verifier::try_from(settings)
                 .expect("failed to create Tokenserver BrowserID verifier"),
         );
         let use_test_transactions = false;
